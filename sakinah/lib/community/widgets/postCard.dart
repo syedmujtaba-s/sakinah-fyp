@@ -48,10 +48,29 @@ class _PostCardState extends State<PostCard> {
           // Header: Avatar, Name, Tag
           Row(
             children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: primaryColor.withOpacity(0.1),
-                child: Icon(Icons.person, color: primaryColor, size: 20),
+              FutureBuilder<DocumentSnapshot>(
+                future: FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(data['userId'])
+                    .get(),
+                builder: (context, snapshot) {
+                  String? photoUrl;
+                  if (snapshot.hasData && snapshot.data!.exists) {
+                    final userData = snapshot.data!.data() as Map<String, dynamic>;
+                    photoUrl = userData['photoUrl'] as String?;
+                  }
+                  
+                  return CircleAvatar(
+                    radius: 18,
+                    backgroundColor: primaryColor.withOpacity(0.1),
+                    backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+                        ? NetworkImage(photoUrl)
+                        : null,
+                    child: (photoUrl == null || photoUrl.isEmpty)
+                        ? Icon(Icons.person, color: primaryColor, size: 20)
+                        : null,
+                  );
+                },
               ),
               const SizedBox(width: 10),
               Expanded(

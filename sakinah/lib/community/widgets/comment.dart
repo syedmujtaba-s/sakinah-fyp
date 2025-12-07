@@ -99,13 +99,36 @@ class _CommentSheetState extends State<CommentSheet> {
                   separatorBuilder: (_, __) => const SizedBox(height: 16),
                   itemBuilder: (context, index) {
                     final data = comments[index].data() as Map<String, dynamic>;
+                    final userId = data['userId'] as String?;
+                    
                     return Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        CircleAvatar(
-                          radius: 16,
-                          backgroundColor: Colors.grey.shade200,
-                          child: const Icon(Icons.person, size: 18, color: Colors.grey),
+                        FutureBuilder<DocumentSnapshot>(
+                          future: userId != null
+                              ? FirebaseFirestore.instance
+                                  .collection('users')
+                                  .doc(userId)
+                                  .get()
+                              : Future.value(null as DocumentSnapshot?),
+                          builder: (context, snapshot) {
+                            String? photoUrl;
+                            if (snapshot.hasData && snapshot.data != null && snapshot.data!.exists) {
+                              final userData = snapshot.data!.data() as Map<String, dynamic>;
+                              photoUrl = userData['photoUrl'] as String?;
+                            }
+                            
+                            return CircleAvatar(
+                              radius: 16,
+                              backgroundColor: Colors.grey.shade200,
+                              backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
+                                  ? NetworkImage(photoUrl)
+                                  : null,
+                              child: (photoUrl == null || photoUrl.isEmpty)
+                                  ? const Icon(Icons.person, size: 18, color: Colors.grey)
+                                  : null,
+                            );
+                          },
                         ),
                         const SizedBox(width: 10),
                         Expanded(
