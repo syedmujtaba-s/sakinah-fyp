@@ -198,14 +198,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF1F2937)),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
+      
       body: SafeArea(
         child: Stack(
           children: [
@@ -217,8 +210,13 @@ class _RegisterPageState extends State<RegisterPage> {
                   children: [
                     const SizedBox(height: 10),
                     // Replaced Logo widget with Icon for simplicity if asset missing
-                    const Icon(Icons.self_improvement, size: 60, color: Color(0xFF15803D)),
-                    const SizedBox(height: 20),
+                    Image.asset(
+  'assets/images/sakina_logo.png',
+  width: 160,
+  height: 160,
+  fit: BoxFit.contain,
+),
+                    const SizedBox(height: 0),
                     
                     Text(
                       "Create Account",

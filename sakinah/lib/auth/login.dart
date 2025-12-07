@@ -208,9 +208,14 @@ class _LoginPageState extends State<LoginPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Align(
+                      Align(
                         alignment: Alignment.center,
-                        child: Icon(Icons.self_improvement_rounded, size: 60, color: Color(0xFF15803D)),
+                        child: Image.asset(
+                          'assets/images/sakina_logo.png',
+                          width: 160,
+                          height: 160,
+                          fit: BoxFit.contain,
+                        ),
                       ),
                       const SizedBox(height: 16),
                       const Text(

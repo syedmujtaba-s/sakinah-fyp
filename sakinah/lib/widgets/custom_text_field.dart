@@ -45,6 +45,8 @@ class CustomTextField extends StatelessWidget {
             hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
             helperText: helperText,
             helperMaxLines: 2,
+            // Allow validation error text to wrap to multiple lines so it's fully visible
+            errorMaxLines: 2,
             filled: true,
             fillColor: const Color(0xFFF3F4F6),
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
