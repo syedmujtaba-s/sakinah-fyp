@@ -14,9 +14,15 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   final _bodyController = TextEditingController();
   bool _isSubmitting = false;
   String? _selectedTag;
-  
+
   // Sakinah Topics
-  final List<String> _tags = ['General', 'Anxiety', 'Gratitude', 'Patience', 'Hope'];
+  final List<String> _tags = [
+    'General',
+    'Anxiety',
+    'Gratitude',
+    'Patience',
+    'Hope',
+  ];
   final Color primaryColor = const Color(0xFF15803D);
 
   Future<void> _submitPost() async {
@@ -29,7 +35,10 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
       // Fetch username
       String username = user.displayName ?? 'Seeker';
-      final userDoc = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
       if (userDoc.exists && userDoc.data()?['firstName'] != null) {
         username = userDoc.data()!['firstName'];
       }
@@ -48,7 +57,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("Error: $e")));
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -65,14 +76,28 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           icon: const Icon(Icons.close, color: Colors.black),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text("Create Post", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Create Post",
+          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+        ),
         actions: [
           TextButton(
             onPressed: _isSubmitting ? null : _submitPost,
-            child: _isSubmitting 
-              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-              : Text("Post", style: TextStyle(color: primaryColor, fontWeight: FontWeight.bold, fontSize: 16)),
-          )
+            child: _isSubmitting
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(
+                    "Post",
+                    style: TextStyle(
+                      color: primaryColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+          ),
         ],
       ),
       body: SingleChildScrollView(
@@ -82,19 +107,27 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           children: [
             // Tag Dropdown
             DropdownButtonFormField<String>(
-              value: _selectedTag,
+              initialValue: _selectedTag,
               hint: const Text("Select Topic"),
-              items: _tags.map((tag) => DropdownMenuItem(value: tag, child: Text(tag))).toList(),
+              items: _tags
+                  .map((tag) => DropdownMenuItem(value: tag, child: Text(tag)))
+                  .toList(),
               onChanged: (val) => setState(() => _selectedTag = val),
               decoration: InputDecoration(
                 filled: true,
                 fillColor: Colors.grey.shade50,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
             ),
             const SizedBox(height: 16),
-            
+
             // Title
             TextField(
               controller: _titleController,
@@ -105,7 +138,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
               ),
             ),
             const Divider(),
-            
+
             // Body
             TextField(
               controller: _bodyController,

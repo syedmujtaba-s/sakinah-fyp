@@ -1,79 +1,119 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'emotion_checkin_screen.dart';
 
-class DashboardScreen extends StatelessWidget {
+class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final user = FirebaseAuth.instance.currentUser;
-    final String displayName = user?.displayName?.split(' ').first ?? "Seeker";
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
 
+class _DashboardScreenState extends State<DashboardScreen> {
+  String? photoUrl;
+  String displayName = "Seeker";
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _loadUserData() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (doc.exists) {
+        final data = doc.data()!;
+        setState(() {
+          photoUrl = data['photoUrl'];
+          displayName =
+              data['firstName'] ??
+              user.displayName?.split(' ').first ??
+              "Seeker";
+        });
+      } else {
+        setState(() {
+          displayName = user.displayName?.split(' ').first ?? "Seeker";
+        });
+      }
+    } catch (e) {
+      setState(() {
+        displayName = user.displayName?.split(' ').first ?? "Seeker";
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFFAFAFA),
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: Colors.white,
+        automaticallyImplyLeading: false,
+        titleSpacing: 16,
+        title: RichText(
+          maxLines: 2,
+          text: TextSpan(
+            children: [
+              const TextSpan(
+                text: "Assalamu Alaikum, ",
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Color(0xFF6B7280),
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              TextSpan(
+                text: displayName,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF064E3B),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16.0),
+            child: CircleAvatar(
+              radius: 20,
+              backgroundColor: const Color(0xFFDCFCE7),
+              backgroundImage: (photoUrl != null && photoUrl!.isNotEmpty)
+                  ? NetworkImage(photoUrl!)
+                  : null,
+              child: (photoUrl == null || photoUrl!.isEmpty)
+                  ? Text(
+                      displayName.isNotEmpty
+                          ? displayName[0].toUpperCase()
+                          : 'S',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF15803D),
+                        fontSize: 16,
+                      ),
+                    )
+                  : null,
+            ),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(20.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // --- Header ---
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        "Assalamu Alaikum,",
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF6B7280),
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        displayName,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF064E3B),
-                        ),
-                      ),
-                    ],
-                  ),
-                  Container(
-                    width: 45,
-                    height: 45,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFDCFCE7),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 2),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 5,
-                        ),
-                      ],
-                    ),
-                    child: Center(
-                      child: Text(
-                        displayName.isNotEmpty ? displayName[0].toUpperCase() : 'S',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF15803D),
-                          fontSize: 18,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 30),
-
               // --- Main Action Card ---
               Container(
                 width: double.infinity,
@@ -96,7 +136,11 @@ class DashboardScreen extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.favorite_rounded, color: Colors.white70, size: 32),
+                    const Icon(
+                      Icons.favorite_rounded,
+                      color: Colors.white70,
+                      size: 32,
+                    ),
                     const SizedBox(height: 16),
                     const Text(
                       "How is your heart feeling today?",
@@ -110,17 +154,16 @@ class DashboardScreen extends StatelessWidget {
                     const SizedBox(height: 8),
                     const Text(
                       "Check in to receive Seerah guidance.",
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 14,
-                      ),
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
                     ),
                     const SizedBox(height: 24),
                     ElevatedButton(
                       onPressed: () {
                         Navigator.push(
                           context,
-                          MaterialPageRoute(builder: (_) => const EmotionCheckinScreen()),
+                          MaterialPageRoute(
+                            builder: (_) => const EmotionCheckinScreen(),
+                          ),
                         );
                       },
                       style: ElevatedButton.styleFrom(
@@ -130,7 +173,10 @@ class DashboardScreen extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 12,
+                        ),
                       ),
                       child: const Text(
                         "Start Check-in",
@@ -163,7 +209,11 @@ class DashboardScreen extends StatelessWidget {
                 ),
                 child: Column(
                   children: [
-                    const Icon(Icons.format_quote_rounded, color: Color(0xFF15803D), size: 30),
+                    const Icon(
+                      Icons.format_quote_rounded,
+                      color: Color(0xFF15803D),
+                      size: 30,
+                    ),
                     const SizedBox(height: 8),
                     const Text(
                       "Verily, with hardship comes ease.",
@@ -187,7 +237,7 @@ class DashboardScreen extends StatelessWidget {
                   ],
                 ),
               ),
-              
+
               const SizedBox(height: 40),
             ],
           ),

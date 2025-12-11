@@ -18,7 +18,7 @@ class _HomeMainState extends State<HomeMain> {
 
   // These are the screens for the tabs.
   // We use placeholders for Habits, Community, and Profile for now.
-    final List<Widget> _screens = [
+  final List<Widget> _screens = [
     const DashboardScreen(),
     const PlaceholderScreen(title: "Habit Tracker"),
     const SizedBox(), // Placeholder for the middle button (handled in onTap)
@@ -30,32 +30,7 @@ class _HomeMainState extends State<HomeMain> {
   Widget build(BuildContext context) {
     return Scaffold(
       // IndexedStack keeps the state of the pages so they don't reload when switching tabs
-      body: IndexedStack(
-        index: _currentIndex,
-        children: _screens,
-      ),
-      appBar: _currentIndex != 2 ? AppBar(
-        title: const Text('Sakinah'),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF15803D),
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await FirebaseAuth.instance.signOut();
-              if (context.mounted) {
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginPage()),
-                  (route) => false,
-                );
-              }
-            },
-          )
-        ],
-      ) : null,
+      body: IndexedStack(index: _currentIndex, children: _screens),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -73,12 +48,12 @@ class _HomeMainState extends State<HomeMain> {
             // Logic: If user taps the middle button (Index 2), open Check-in Screen
             if (index == 2) {
               Navigator.push(
-                context, 
-                MaterialPageRoute(builder: (_) => const EmotionCheckinScreen())
+                context,
+                MaterialPageRoute(builder: (_) => const EmotionCheckinScreen()),
               );
-              return; 
+              return;
             }
-            
+
             setState(() {
               _currentIndex = index;
             });
@@ -88,7 +63,10 @@ class _HomeMainState extends State<HomeMain> {
           selectedItemColor: const Color(0xFF15803D), // Sakinah Green
           unselectedItemColor: Colors.grey.shade400,
           showUnselectedLabels: true,
-          selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+          selectedLabelStyle: const TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 12,
+          ),
           unselectedLabelStyle: const TextStyle(fontSize: 12),
           elevation: 0,
           items: [
@@ -115,9 +93,12 @@ class _HomeMainState extends State<HomeMain> {
                     ),
                   ],
                 ),
-                child: const Icon(Icons.qr_code_scanner_rounded, color: Colors.white),
+                child: const Icon(
+                  Icons.camera_alt_rounded,
+                  color: Colors.white,
+                ),
               ),
-              label: '', 
+              label: '',
             ),
             const BottomNavigationBarItem(
               icon: Icon(Icons.people_outline_rounded),

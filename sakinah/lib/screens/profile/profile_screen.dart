@@ -5,7 +5,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:path/path.dart' as path;
 import '../../auth/changePassword.dart';
 import '../../auth/login.dart';
 import 'feedback_screen.dart';
@@ -50,15 +49,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _loadUserProfile() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    
+
     setState(() => isLoading = true);
-    
+
     try {
       final doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
-          
+
       if (doc.exists) {
         final data = doc.data()!;
         setState(() {
@@ -83,9 +82,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     } catch (e) {
       setState(() => isLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load profile: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to load profile: $e')));
       }
     }
   }
@@ -98,7 +97,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       maxHeight: 1024,
       imageQuality: 85,
     );
-    
+
     if (pickedFile != null) {
       setState(() {
         if (!kIsWeb) {
@@ -157,10 +156,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final uploadedUrl = await ref.getDownloadURL();
 
       // Update Firestore
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
-        'photoUrl': uploadedUrl,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).update(
+        {'photoUrl': uploadedUrl, 'updatedAt': FieldValue.serverTimestamp()},
+      );
 
       setState(() {
         photoUrl = uploadedUrl;
@@ -211,7 +209,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel', style: TextStyle(color: Colors.grey.shade700)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade700),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
@@ -244,10 +245,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       // Clear photoUrl in Firestore
-      await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
-        'photoUrl': FieldValue.delete(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).update(
+        {
+          'photoUrl': FieldValue.delete(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+      );
 
       setState(() {
         photoUrl = null;
@@ -279,7 +282,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _saveProfile() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => isSaving = true);
-    
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       setState(() => isSaving = false);
@@ -299,7 +302,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       // Update Auth Display Name
       await user.updateDisplayName(
-        "${_firstNameController.text.trim()} ${_lastNameController.text.trim()}"
+        "${_firstNameController.text.trim()} ${_lastNameController.text.trim()}",
       );
 
       if (mounted) {
@@ -333,7 +336,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel', style: TextStyle(color: Colors.grey.shade700)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade700),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
@@ -347,8 +353,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await FirebaseAuth.instance.signOut();
       if (mounted) {
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const LoginPage()), 
-          (route) => false
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
         );
       }
     }
@@ -365,8 +371,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
         title: const Text(
           'My Profile',
           style: TextStyle(
-            color: Color(0xFF15803D), 
-            fontWeight: FontWeight.bold
+            color: Color(0xFF15803D),
+            fontWeight: FontWeight.bold,
           ),
         ),
         centerTitle: true,
@@ -396,10 +402,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             backgroundImage: _imageFile != null
                                 ? FileImage(_imageFile!)
                                 : (photoUrl != null && photoUrl!.isNotEmpty
-                                    ? NetworkImage(photoUrl!) as ImageProvider
-                                    : null),
-                            child: (photoUrl == null || photoUrl!.isEmpty) && 
-                                   _imageFile == null
+                                      ? NetworkImage(photoUrl!) as ImageProvider
+                                      : null),
+                            child:
+                                (photoUrl == null || photoUrl!.isEmpty) &&
+                                    _imageFile == null
                                 ? Icon(
                                     Icons.person,
                                     size: 60,
@@ -420,7 +427,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               decoration: BoxDecoration(
                                 color: primaryColor,
                                 shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 2),
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 2,
+                                ),
                               ),
                               child: isSaving
                                   ? const SizedBox(
@@ -452,7 +462,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 decoration: BoxDecoration(
                                   color: Colors.red,
                                   shape: BoxShape.circle,
-                                  border: Border.all(color: Colors.white, width: 2),
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
                                 ),
                                 child: const Icon(
                                   Icons.delete_outline,
@@ -465,9 +478,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ],
                     ),
                   ),
-                  
+
                   const SizedBox(height: 16),
-                  
+
                   Text(
                     '${_firstNameController.text} ${_lastNameController.text}',
                     style: const TextStyle(
@@ -485,7 +498,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   // --- Personal Information (Collapsible) ---
                   _buildSectionHeader('Personal Information'),
                   const SizedBox(height: 8),
-                  
+
                   ExpansionTile(
                     tilePadding: EdgeInsets.zero,
                     childrenPadding: const EdgeInsets.symmetric(vertical: 16),
@@ -525,9 +538,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               'Email',
                               readOnly: true,
                             ),
-                            
+
                             const SizedBox(height: 24),
-                            
+
                             SizedBox(
                               width: double.infinity,
                               child: ElevatedButton(
@@ -535,7 +548,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: primaryColor,
                                   foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                  ),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12),
                                   ),
@@ -567,10 +582,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                   _buildSectionHeader('Account Settings'),
                   const SizedBox(height: 8),
-                  
+
                   // Settings tiles
                   _buildSettingsTile(
-                    icon: Icons.lock_outline, 
+                    icon: Icons.lock_outline,
                     title: 'Change Password',
                     onTap: () {
                       Navigator.push(
@@ -581,7 +596,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       );
                     },
                   ),
-                  
+
                   _buildSettingsTile(
                     icon: Icons.feedback_outlined,
                     title: 'Feedback',
@@ -594,20 +609,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       );
                     },
                   ),
-                  
+
                   _buildSettingsTile(
                     icon: Icons.description_outlined,
                     title: 'Terms of Use',
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(
-                          builder: (_) => const TermsScreen(),
-                        ),
+                        MaterialPageRoute(builder: (_) => const TermsScreen()),
                       );
                     },
                   ),
-                  
+
                   _buildSettingsTile(
                     icon: Icons.privacy_tip_outlined,
                     title: 'Privacy Policy',
@@ -622,7 +635,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
 
                   const SizedBox(height: 20),
-                  
+
                   // Logout with confirmation
                   ListTile(
                     contentPadding: EdgeInsets.zero,
@@ -643,7 +656,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     onTap: _logout,
                   ),
-                  
+
                   const SizedBox(height: 40),
                 ],
               ),
@@ -705,10 +718,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         child: Icon(icon, color: Colors.grey.shade700),
       ),
-      title: Text(
-        title,
-        style: const TextStyle(fontWeight: FontWeight.w600),
-      ),
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
       trailing: const Icon(Icons.chevron_right, color: Colors.grey),
       onTap: onTap,
     );
