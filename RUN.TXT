@@ -1,0 +1,25 @@
+== SAKINAH REPO SETUP ==
+
+Backend:
+1. cd backend
+2. python -m venv .venv
+3. .venv\Scripts\activate          (Windows)
+4. pip install -r requirements.txt
+5. copy .env.example .env
+6. Fill in MONGO_URI / DB_NAME / GROQ_API_KEY
+7. python seed_stories.py
+8. uvicorn main:app --reload
+
+Backend tests:
+- cd backend
+- .venv\Scripts\python.exe -m pytest test_api.py -q
+
+Flutter app:
+1. cd app
+2. flutter pub get
+3. flutter run
+
+Notes:
+- Re-index backend stories later with:
+  python -c "from rag import sync_new_stories; sync_new_stories()"
+- Do not commit backend/.env

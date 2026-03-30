@@ -1,0 +1,29 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Python / backend
+backend/.env
+backend/.venv/
+backend/venv/
+backend/env/
+backend/__pycache__/
+backend/.pytest_cache/
+backend/*.pyc
+
+# Flutter / generated
+app/.dart_tool/
+app/.flutter-plugins-dependencies
+app/.pub/
+app/build/
+app/coverage/
+
+# Temporary legacy folder leftovers after rename
+sakinah/.dart_tool/
+sakinah/.flutter-plugins-dependencies
+sakinah/build/
+
+# Secrets / local configs
+app/android/app/google-services.json
