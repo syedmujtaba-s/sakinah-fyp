@@ -62,37 +62,60 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
   // ───── Seed Default Habits ─────
   Future<void> _seedDefaultHabits() async {
     setState(() => _seeding = true);
-    final batch = FirebaseFirestore.instance.batch();
-    final habitsRef = FirebaseFirestore.instance
-        .collection('users')
-        .doc(_uid)
-        .collection('habits');
 
-    final defaults = [
-      {'title': 'Fajr Prayer', 'category': 'prayer', 'icon': 'mosque', 'color': '#15803D'},
-      {'title': 'Dhuhr Prayer', 'category': 'prayer', 'icon': 'mosque', 'color': '#15803D'},
-      {'title': 'Asr Prayer', 'category': 'prayer', 'icon': 'mosque', 'color': '#15803D'},
-      {'title': 'Maghrib Prayer', 'category': 'prayer', 'icon': 'mosque', 'color': '#15803D'},
-      {'title': 'Isha Prayer', 'category': 'prayer', 'icon': 'mosque', 'color': '#15803D'},
-      {'title': 'Quran Reading', 'category': 'quran', 'icon': 'menu_book', 'color': '#2563EB'},
-      {'title': 'Morning Adhkar', 'category': 'dhikr', 'icon': 'wb_sunny', 'color': '#D97706'},
-      {'title': 'Evening Adhkar', 'category': 'dhikr', 'icon': 'nights_stay', 'color': '#4F46E5'},
-      {'title': 'Dhikr / Tasbeeh', 'category': 'dhikr', 'icon': 'favorite', 'color': '#7C3AED'},
-      {'title': 'Charity / Sadaqah', 'category': 'wellness', 'icon': 'volunteer_activism', 'color': '#0D9488'},
-    ];
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      final habitsRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(_uid)
+          .collection('habits');
 
-    for (final h in defaults) {
-      final doc = habitsRef.doc();
-      batch.set(doc, {
-        ...h,
-        'frequency': 'daily',
-        'isActive': true,
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+      final defaults = [
+        {'title': 'Fajr Prayer', 'category': 'prayer', 'icon': 'mosque', 'color': '#15803D'},
+        {'title': 'Dhuhr Prayer', 'category': 'prayer', 'icon': 'mosque', 'color': '#15803D'},
+        {'title': 'Asr Prayer', 'category': 'prayer', 'icon': 'mosque', 'color': '#15803D'},
+        {'title': 'Maghrib Prayer', 'category': 'prayer', 'icon': 'mosque', 'color': '#15803D'},
+        {'title': 'Isha Prayer', 'category': 'prayer', 'icon': 'mosque', 'color': '#15803D'},
+        {'title': 'Quran Reading', 'category': 'quran', 'icon': 'menu_book', 'color': '#2563EB'},
+        {'title': 'Morning Adhkar', 'category': 'dhikr', 'icon': 'wb_sunny', 'color': '#D97706'},
+        {'title': 'Evening Adhkar', 'category': 'dhikr', 'icon': 'nights_stay', 'color': '#4F46E5'},
+        {'title': 'Dhikr / Tasbeeh', 'category': 'dhikr', 'icon': 'favorite', 'color': '#7C3AED'},
+        {'title': 'Charity / Sadaqah', 'category': 'wellness', 'icon': 'volunteer_activism', 'color': '#0D9488'},
+      ];
+
+      for (final h in defaults) {
+        final doc = habitsRef.doc();
+        batch.set(doc, {
+          ...h,
+          'frequency': 'daily',
+          'isActive': true,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      await batch.commit();
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Starter Islamic habits added.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not add starter habits: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _seeding = false);
+      }
     }
-
-    await batch.commit();
-    if (mounted) setState(() => _seeding = false);
   }
 
   // ───── Toggle Habit Completion ─────
@@ -386,6 +409,12 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 14, color: Color(0xFF6B7280), height: 1.5),
             ),
+            const SizedBox(height: 8),
+            const Text(
+              'This adds a starter set directly to your tracker.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 12, color: Color(0xFF9CA3AF)),
+            ),
             const SizedBox(height: 32),
             SizedBox(
               width: double.infinity,
@@ -403,7 +432,7 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
                         child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                       )
                     : const Text(
-                        'Get Started with Islamic Habits',
+                        'Add Starter Islamic Habits',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                       ),
               ),
