@@ -221,8 +221,50 @@ async def list_stories():
     return {"count": len(stories), "stories": stories}
 
 
+@router.get("/stories/count")
+async def stories_count():
+    """Return only the total story count — cheap for dashboards."""
+    return {"count": stories_collection.count_documents({})}
+
+
 # ============================
-#  4. DELETE A STORY
+#  4. UPDATE A STORY
+# ============================
+@router.put("/stories/{story_id}")
+async def update_story(story_id: str, story: StoryCreate):
+    """Update a story and re-index it for RAG."""
+    try:
+        obj_id = ObjectId(story_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid story ID format.")
+
+    existing = stories_collection.find_one({"_id": obj_id})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Story not found.")
+
+    # Title uniqueness — allow keeping the same title, block collision with a different story
+    dup = stories_collection.find_one({"title": story.title, "_id": {"$ne": obj_id}})
+    if dup:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Another story with title '{story.title}' already exists.",
+        )
+
+    stories_collection.update_one({"_id": obj_id}, {"$set": story.model_dump()})
+
+    # Drop stale index entries and rebuild chunks for this story
+    story_index_collection.delete_many({"story_id": story_id})
+    sync_new_stories()
+
+    return {
+        "message": "Story updated and re-indexed successfully",
+        "story_id": story_id,
+        "title": story.title,
+    }
+
+
+# ============================
+#  5. DELETE A STORY
 # ============================
 @router.delete("/stories/{story_id}")
 async def delete_story(story_id: str):
@@ -242,7 +284,7 @@ async def delete_story(story_id: str):
 
 
 # ============================
-#  5. DOWNLOAD EXCEL TEMPLATE
+#  6. DOWNLOAD EXCEL TEMPLATE
 # ============================
 @router.get("/template")
 async def template_info():
