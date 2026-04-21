@@ -10,8 +10,13 @@ backend/.venv/
 backend/venv/
 backend/env/
 backend/__pycache__/
+backend/**/__pycache__/
 backend/.pytest_cache/
 backend/*.pyc
+
+# Local-only backend files (not checked in)
+backend/validate_jsonl.py
+backend/data/stories/moon split seerah_dataset ).jsonl
 
 # Flutter / generated
 app/.dart_tool/

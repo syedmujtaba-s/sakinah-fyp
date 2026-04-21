@@ -16,7 +16,7 @@ from bson import ObjectId
 from database import stories_collection, story_index_collection
 
 # --- CONFIG ---
-SCORE_THRESHOLD = 0.40          # Minimum cosine similarity (raised from 0.25)
+SCORE_THRESHOLD = 0.35          # Minimum cosine similarity (lowered from 0.40 after regression suite — p50 was 0.443; 0.40 was filtering valid retrievals)
 CHUNK_MAX_WORDS = 150           # Max words per chunk
 CHUNK_OVERLAP_WORDS = 30        # Overlap between chunks for context continuity
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data", "stories")
@@ -126,8 +126,24 @@ def sync_new_stories():
 
     print(f"Total Stories: {len(all_stories)} | Already Indexed: {len(indexed_ids)}")
 
-    new_entries = []
     embedder = get_embedder()
+    batch = []
+    BATCH_SIZE = 25  # stories per batch — keeps DB connections short
+    total_chunks = 0
+    total_stories_indexed = 0
+
+    def _flush(batch_entries):
+        """Insert one batch into MongoDB with retry on connection errors."""
+        if not batch_entries:
+            return
+        for attempt in range(3):
+            try:
+                story_index_collection.insert_many(batch_entries)
+                return
+            except Exception as e:
+                print(f"  Insert attempt {attempt + 1} failed: {e}")
+                if attempt == 2:
+                    raise
 
     for story in all_stories:
         s_id = str(story["_id"])
@@ -137,7 +153,7 @@ def sync_new_stories():
         chunks = _build_chunks(story)
         for chunk in chunks:
             embedding = embedder.encode(chunk["text"]).tolist()
-            new_entries.append({
+            batch.append({
                 "story_id": s_id,
                 "text": chunk["text"],
                 "chunk_type": chunk["chunk_type"],
@@ -151,10 +167,22 @@ def sync_new_stories():
                 }
             })
 
-    if new_entries:
-        print(f"Indexing {len(new_entries)} chunks from {len(new_entries)} new entries...")
-        story_index_collection.insert_many(new_entries)
-        print("Done indexing.")
+        total_stories_indexed += 1
+
+        # Flush batch to Mongo every N stories
+        if total_stories_indexed % BATCH_SIZE == 0:
+            _flush(batch)
+            total_chunks += len(batch)
+            print(f"  Indexed {total_stories_indexed} stories ({total_chunks} chunks)...")
+            batch = []
+
+    # Final flush
+    if batch:
+        _flush(batch)
+        total_chunks += len(batch)
+
+    if total_stories_indexed:
+        print(f"Done: indexed {total_stories_indexed} stories ({total_chunks} chunks).")
     else:
         print("Index is up to date.")
 

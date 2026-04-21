@@ -1,0 +1,87 @@
+{
+  "total_stories": 369,
+  "total_chunks": 1110,
+  "per_emotion": {
+    "happy": 79,
+    "sad": 117,
+    "anxious": 164,
+    "angry": 80,
+    "confused": 52,
+    "grateful": 188,
+    "lonely": 46,
+    "stressed": 136,
+    "fearful": 89,
+    "guilty": 16,
+    "hopeless": 32,
+    "overwhelmed": 67,
+    "rejected": 51,
+    "embarrassed": 7,
+    "lost": 28
+  },
+  "sorted_emotions": [
+    [
+      "grateful",
+      188
+    ],
+    [
+      "anxious",
+      164
+    ],
+    [
+      "stressed",
+      136
+    ],
+    [
+      "sad",
+      117
+    ],
+    [
+      "fearful",
+      89
+    ],
+    [
+      "angry",
+      80
+    ],
+    [
+      "happy",
+      79
+    ],
+    [
+      "overwhelmed",
+      67
+    ],
+    [
+      "confused",
+      52
+    ],
+    [
+      "rejected",
+      51
+    ],
+    [
+      "lonely",
+      46
+    ],
+    [
+      "hopeless",
+      32
+    ],
+    [
+      "lost",
+      28
+    ],
+    [
+      "guilty",
+      16
+    ],
+    [
+      "embarrassed",
+      7
+    ]
+  ],
+  "thin": [],
+  "empty": [],
+  "unknown_emotions": {},
+  "stories_without_emotions": 0
+}

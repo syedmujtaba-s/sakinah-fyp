@@ -28,8 +28,11 @@ SUPPORTED_EMOTIONS = [
 
 # --- Crisis keywords — checked before RAG/Groq ---
 CRISIS_KEYWORDS = [
-    "kill myself", "end my life", "want to die", "suicide", "suicidal",
-    "self-harm", "self harm", "hurt myself", "cut myself", "no reason to live",
+    "kill myself", "end my life", "ending my life", "end it all", "take my life",
+    "want to die", "suicide", "suicidal",
+    "self-harm", "self harm", "hurt myself", "cut myself",
+    "no reason to live", "no point living", "not worth living",
+    "better off dead", "give up on life",
     "can't go on", "cannot go on", "don't want to live", "do not want to live"
 ]
 
