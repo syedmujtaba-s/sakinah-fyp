@@ -8,14 +8,18 @@ Admin endpoints for managing Seerah stories.
 """
 
 import io
+import os
 from typing import Optional
 from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from bson import ObjectId
 from openpyxl import Workbook, load_workbook
 
 from database import stories_collection, story_index_collection
 from rag import sync_new_stories
+
+TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "story_template.xlsx")
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -241,8 +245,8 @@ async def delete_story(story_id: str):
 #  5. DOWNLOAD EXCEL TEMPLATE
 # ============================
 @router.get("/template")
-async def download_template():
-    """Returns the expected column format for the Excel upload."""
+async def template_info():
+    """Returns the expected column format for the Excel upload (JSON)."""
     return {
         "message": "Use these exact column headers in your Excel file (row 1):",
         "columns": [
@@ -256,3 +260,15 @@ async def download_template():
             "supported_emotions": SUPPORTED_EMOTIONS
         }
     }
+
+
+@router.get("/template/download")
+async def download_template_file():
+    """Returns the pre-built story_template.xlsx file for admins to fill in."""
+    if not os.path.exists(TEMPLATE_PATH):
+        raise HTTPException(status_code=404, detail="Template file not found on server.")
+    return FileResponse(
+        TEMPLATE_PATH,
+        filename="story_template.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
