@@ -25,6 +25,9 @@ app/.pub/
 app/build/
 app/coverage/
 
+# Debug screenshots from physical-device testing
+app/flutter_*.png
+
 # Temporary legacy folder leftovers after rename
 sakinah/.dart_tool/
 sakinah/.flutter-plugins-dependencies

@@ -1,14 +1,21 @@
 == SAKINAH REPO SETUP ==
 
+after aevery restar or plug unplug
+adb reverse tcp:8000 tcp:8000
+
+
+
 Backend:
 1. cd backend
 2. python -m venv .venv
 3. .venv\Scripts\activate          (Windows)
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
 4. pip install -r requirements.txt
 5. copy .env.example .env
 6. Fill in MONGO_URI / DB_NAME / GROQ_API_KEY
 7. python seed_stories.py
-8. uvicorn main:app --reload
+8. 
 
 Backend tests:
 - cd backend

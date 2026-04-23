@@ -1,6 +1,8 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-class GuidanceScreen extends StatelessWidget {
+class GuidanceScreen extends StatefulWidget {
   final String mood;
   final Map<String, dynamic> guidanceData;
 
@@ -11,7 +13,88 @@ class GuidanceScreen extends StatelessWidget {
   });
 
   @override
+  State<GuidanceScreen> createState() => _GuidanceScreenState();
+}
+
+class _GuidanceScreenState extends State<GuidanceScreen> {
+  final Set<String> _trackedAdvice = {};
+  final Set<String> _tracking = {};
+
+  String _slug(String s) => s
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'^_+|_+$'), '');
+
+  Future<void> _trackAdvice(String advice) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to track this advice as a habit.')),
+      );
+      return;
+    }
+    if (_tracking.contains(advice) || _trackedAdvice.contains(advice)) return;
+
+    setState(() => _tracking.add(advice));
+
+    final storyTitle = widget.guidanceData['story_title']?.toString() ?? '';
+    final storyId = widget.guidanceData['story_id']?.toString() ?? '';
+    final emotion = widget.mood;
+
+    // Deterministic ID: story + first chars of advice slug, so re-tapping the
+    // same bullet in the same session is idempotent.
+    final adviceSlug = _slug(advice);
+    final shortSlug = adviceSlug.length > 40 ? adviceSlug.substring(0, 40) : adviceSlug;
+    final docId = 'advice_${_slug(storyTitle)}_$shortSlug';
+
+    // Habit title: first ~40 chars of the advice, trailing ellipsis if cut.
+    final habitTitle = advice.length > 45 ? '${advice.substring(0, 42).trim()}…' : advice;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('habits')
+          .doc(docId)
+          .set({
+        'title': habitTitle,
+        'category': 'guidance',
+        'icon': 'lightbulb',
+        'color': '#15803D',
+        'frequency': 'daily',
+        'isActive': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'sourceAdvice': advice,
+        'sourceStoryId': storyId,
+        'sourceStoryTitle': storyTitle,
+        'sourceEmotion': emotion,
+        'feedbackStatus': null,
+      }, SetOptions(merge: true));
+
+      if (!mounted) return;
+      setState(() {
+        _tracking.remove(advice);
+        _trackedAdvice.add(advice);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Added to your Habits — check the Habits tab.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _tracking.remove(advice));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not add habit: $e')),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final guidanceData = widget.guidanceData;
+    final mood = widget.mood;
     final title = guidanceData['story_title'] ?? 'Guidance';
     final period = guidanceData['story_period'] ?? '';
     final seerahConnection = guidanceData['seerah_connection'] ?? '';
@@ -93,13 +176,9 @@ class GuidanceScreen extends StatelessWidget {
                     const SizedBox(height: 16),
                   ],
 
-                  // Practical Advice
+                  // Practical Advice — each bullet is trackable as a habit
                   if (practicalAdvice.isNotEmpty) ...[
-                    _buildSectionCard(
-                      icon: Icons.checklist_rounded,
-                      title: "Practical Advice",
-                      items: practicalAdvice,
-                    ),
+                    _buildTrackableAdviceCard(practicalAdvice),
                     const SizedBox(height: 24),
                   ],
 
@@ -178,6 +257,108 @@ class GuidanceScreen extends StatelessWidget {
           fontWeight: FontWeight.bold,
           fontSize: 12,
         ),
+      ),
+    );
+  }
+
+  Widget _buildTrackableAdviceCard(List<String> items) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.checklist_rounded, color: Color(0xFF15803D), size: 20),
+              SizedBox(width: 8),
+              Text('Practical Advice',
+                  style: TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF15803D))),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Tap "Track" to add any step to your Habit Tracker.',
+            style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+          ),
+          const SizedBox(height: 12),
+          ...items.map((item) {
+            final tracked = _trackedAdvice.contains(item);
+            final loading = _tracking.contains(item);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Text('  •  ',
+                        style: TextStyle(color: Color(0xFF15803D), fontWeight: FontWeight.bold)),
+                  ),
+                  Expanded(
+                    child: Text(
+                      item,
+                      style: const TextStyle(color: Color(0xFF374151), height: 1.4),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  SizedBox(
+                    height: 32,
+                    child: tracked
+                        ? Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFDCFCE7),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            alignment: Alignment.center,
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.check_circle, size: 14, color: Color(0xFF15803D)),
+                                SizedBox(width: 4),
+                                Text('Tracking',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Color(0xFF15803D),
+                                    )),
+                              ],
+                            ),
+                          )
+                        : ElevatedButton(
+                            onPressed: loading ? null : () => _trackAdvice(item),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF15803D),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              minimumSize: const Size(0, 32),
+                              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                            child: loading
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Text('Track'),
+                          ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
       ),
     );
   }

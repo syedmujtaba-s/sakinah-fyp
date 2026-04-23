@@ -7,13 +7,21 @@ import 'journal_history_screen.dart';
 
 class JournalingScreen extends StatefulWidget {
   final String mood;
-  const JournalingScreen({super.key, required this.mood});
+  // When a habit's source advice didn't help, we route the user here with the
+  // original story excluded so the RAG pipeline surfaces something different.
+  final List<String> excludeStoryIds;
+  const JournalingScreen({
+    super.key,
+    required this.mood,
+    this.excludeStoryIds = const [],
+  });
 
   @override
   State<JournalingScreen> createState() => _JournalingScreenState();
 }
 
 class _JournalingScreenState extends State<JournalingScreen> {
+  static bool _hasFetchedGuidanceThisSession = false;
   final TextEditingController _journalController = TextEditingController();
   bool _isProcessing = false;
 
@@ -49,8 +57,10 @@ class _JournalingScreenState extends State<JournalingScreen> {
       final guidanceData = await GuidanceService.getGuidance(
         journalEntry: journalText,
         emotion: widget.mood,
+        excludeStoryIds: widget.excludeStoryIds,
       );
 
+      _hasFetchedGuidanceThisSession = true;
       if (!mounted) return;
 
       Navigator.pushReplacement(
@@ -66,13 +76,13 @@ class _JournalingScreenState extends State<JournalingScreen> {
       if (!mounted) return;
       setState(() => _isProcessing = false);
 
+      debugPrint('GuidanceService error: $e');
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Could not connect to guidance server. Please make sure the backend is running.',
-          ),
+          content: Text('Guidance failed: $e'),
           backgroundColor: Colors.red.shade700,
-          duration: const Duration(seconds: 4),
+          duration: const Duration(seconds: 8),
         ),
       );
     }
@@ -208,6 +218,15 @@ class _JournalingScreenState extends State<JournalingScreen> {
                         ),
                 ),
               ),
+              if (_isProcessing && !_hasFetchedGuidanceThisSession)
+                const Padding(
+                  padding: EdgeInsets.only(top: 12),
+                  child: Text(
+                    'The first response can take up to a minute while the model warms up.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontSize: 12, color: Color(0xFF6B7280), height: 1.4),
+                  ),
+                ),
             ],
           ),
         ),

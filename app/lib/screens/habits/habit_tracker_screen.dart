@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../widgets/progress_ring.dart';
 import '../../widgets/habit_card.dart';
+import '../journaling_screen.dart';
 import 'add_habit_screen.dart';
 import 'habit_detail_screen.dart';
 
@@ -56,8 +57,15 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
 
   final _categories = ['All', 'Prayer', 'Quran', 'Dhikr', 'Wellness', 'Custom'];
 
+  String? get _uidOrNull => FirebaseAuth.instance.currentUser?.uid;
   String get _uid => FirebaseAuth.instance.currentUser!.uid;
   String get _todayStr => dateStr(DateTime.now());
+
+  // Deterministic doc ID from a habit title — keeps re-seeding idempotent.
+  String _slug(String s) => s
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'^_+|_+$'), '');
 
   // ───── Seed Default Habits ─────
   Future<void> _seedDefaultHabits() async {
@@ -84,13 +92,14 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
       ];
 
       for (final h in defaults) {
-        final doc = habitsRef.doc();
+        final docId = 'default_${_slug(h['title']!)}';
+        final doc = habitsRef.doc(docId);
         batch.set(doc, {
           ...h,
           'frequency': 'daily',
           'isActive': true,
           'createdAt': FieldValue.serverTimestamp(),
-        });
+        }, SetOptions(merge: true));
       }
 
       await batch.commit();
@@ -116,6 +125,181 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
         setState(() => _seeding = false);
       }
     }
+  }
+
+  // ───── Clean Up Duplicate Habits ─────
+  Future<void> _cleanUpDuplicates() async {
+    final uid = _uidOrNull;
+    if (uid == null) return;
+
+    final habitsRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('habits');
+
+    final snap = await habitsRef.get();
+
+    // Group by normalized title
+    final groups = <String, List<QueryDocumentSnapshot>>{};
+    for (final doc in snap.docs) {
+      final data = doc.data() as Map<String, dynamic>;
+      final key = (data['title']?.toString() ?? '').trim().toLowerCase();
+      if (key.isEmpty) continue;
+      groups.putIfAbsent(key, () => []).add(doc);
+    }
+
+    // Decide which doc per group to keep: prefer a `default_*` ID, else the oldest createdAt.
+    final toDelete = <QueryDocumentSnapshot>[];
+    for (final entry in groups.entries) {
+      if (entry.value.length < 2) continue;
+      final docs = entry.value.toList();
+      docs.sort((a, b) {
+        final aDefault = a.id.startsWith('default_') ? 0 : 1;
+        final bDefault = b.id.startsWith('default_') ? 0 : 1;
+        if (aDefault != bDefault) return aDefault.compareTo(bDefault);
+        final aTs = (a.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
+        final bTs = (b.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
+        if (aTs == null && bTs == null) return 0;
+        if (aTs == null) return 1;
+        if (bTs == null) return -1;
+        return aTs.compareTo(bTs);
+      });
+      // Keep docs[0], delete the rest
+      toDelete.addAll(docs.skip(1));
+    }
+
+    if (toDelete.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No duplicates found.'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+
+    // Confirm with the user before destructive action
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clean up duplicates?'),
+        content: Text(
+          'Found ${toDelete.length} duplicate habit(s) across ${groups.entries.where((e) => e.value.length > 1).length} title(s).\n\n'
+          'The oldest entry for each title is kept. Completion logs tied to removed duplicates will also be deleted.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Delete duplicates'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      final db = FirebaseFirestore.instance;
+      final deletedIds = toDelete.map((d) => d.id).toList();
+
+      // Delete habit docs (batched, chunks of 500)
+      for (var i = 0; i < toDelete.length; i += 500) {
+        final batch = db.batch();
+        for (final doc in toDelete.skip(i).take(500)) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit();
+      }
+
+      // Delete orphan habitLogs pointing to deleted habit IDs (whereIn capped at 30 per query)
+      final logsRef = db.collection('users').doc(uid).collection('habitLogs');
+      for (var i = 0; i < deletedIds.length; i += 30) {
+        final chunk = deletedIds.skip(i).take(30).toList();
+        final logsSnap = await logsRef.where('habitId', whereIn: chunk).get();
+        for (var j = 0; j < logsSnap.docs.length; j += 500) {
+          final batch = db.batch();
+          for (final logDoc in logsSnap.docs.skip(j).take(500)) {
+            batch.delete(logDoc.reference);
+          }
+          await batch.commit();
+        }
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cleaned up ${toDelete.length} duplicate(s).'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Cleanup failed: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  // ───── Feedback Loop: mark applied advice as Success / Struggled ─────
+  Future<void> _markFeedback(String habitId, String status) async {
+    final uid = _uidOrNull;
+    if (uid == null) return;
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('habits')
+          .doc(habitId)
+          .update({
+        'feedbackStatus': status,
+        'feedbackAt': FieldValue.serverTimestamp(),
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(status == 'success'
+              ? 'MashaAllah — keep going.'
+              : 'Thanks for the feedback.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save feedback: $e')),
+      );
+    }
+  }
+
+  Future<void> _handleStruggled(
+    String habitId,
+    Map<String, dynamic> habitData,
+  ) async {
+    // Record the feedback so the strip disappears regardless of what happens next.
+    await _markFeedback(habitId, 'struggled');
+
+    if (!mounted) return;
+
+    final sourceEmotion = habitData['sourceEmotion']?.toString() ?? '';
+    final sourceStoryId = habitData['sourceStoryId']?.toString() ?? '';
+    if (sourceEmotion.isEmpty) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => JournalingScreen(
+          mood: sourceEmotion,
+          excludeStoryIds: sourceStoryId.isNotEmpty ? [sourceStoryId] : const [],
+        ),
+      ),
+    );
   }
 
   // ───── Toggle Habit Completion ─────
@@ -186,6 +370,7 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final uid = _uidOrNull;
     return Scaffold(
       backgroundColor: const Color(0xFFFAFAFA),
       appBar: AppBar(
@@ -197,31 +382,69 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
         elevation: 0,
         centerTitle: true,
         automaticallyImplyLeading: false,
+        actions: uid == null
+            ? null
+            : [
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, color: Color(0xFF6B7280)),
+                  onSelected: (value) {
+                    if (value == 'cleanup') _cleanUpDuplicates();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'cleanup',
+                      child: Row(
+                        children: [
+                          Icon(Icons.cleaning_services_outlined, size: 20, color: Color(0xFF6B7280)),
+                          SizedBox(width: 12),
+                          Text('Clean up duplicates'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const AddHabitScreen()),
-          );
-        },
-        backgroundColor: const Color(0xFF15803D),
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
-      body: StreamBuilder<QuerySnapshot>(
+      floatingActionButton: uid == null
+          ? null
+          : FloatingActionButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const AddHabitScreen()),
+                );
+              },
+              backgroundColor: const Color(0xFF15803D),
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
+      body: uid == null
+          ? _buildSignInRequired()
+          : StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('users')
-            .doc(_uid)
+            .doc(uid)
             .collection('habits')
             .where('isActive', isEqualTo: true)
-            .orderBy('createdAt')
             .snapshots(),
         builder: (context, habitsSnap) {
-          if (habitsSnap.connectionState == ConnectionState.waiting) {
+          if (habitsSnap.hasError) {
+            return _buildErrorState(habitsSnap.error);
+          }
+          if (habitsSnap.connectionState == ConnectionState.waiting &&
+              !habitsSnap.hasData) {
             return const Center(child: CircularProgressIndicator(color: Color(0xFF15803D)));
           }
 
-          final habits = habitsSnap.data?.docs ?? [];
+          // Client-side sort by createdAt (removes need for a composite Firestore index)
+          final habits = List<QueryDocumentSnapshot>.from(habitsSnap.data?.docs ?? []);
+          habits.sort((a, b) {
+            final aTs = (a.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
+            final bTs = (b.data() as Map<String, dynamic>)['createdAt'] as Timestamp?;
+            if (aTs == null && bTs == null) return 0;
+            if (aTs == null) return 1;
+            if (bTs == null) return -1;
+            return aTs.compareTo(bTs);
+          });
 
           // Empty state
           if (habits.isEmpty) {
@@ -239,11 +462,13 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
           return StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('users')
-                .doc(_uid)
+                .doc(uid)
                 .collection('habitLogs')
                 .where('date', isEqualTo: _todayStr)
                 .snapshots(),
             builder: (context, logsSnap) {
+              // Log failures degrade gracefully — habits still render, just with no
+              // "completed today" state. Far better than blocking the entire screen.
               final todayLogs = <String>{};
               if (logsSnap.hasData) {
                 for (final doc in logsSnap.data!.docs) {
@@ -327,6 +552,16 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
                           final weekly = (snap.data?[0] as List<bool>?) ?? List.filled(7, false);
                           final streak = (snap.data?[1] as int?) ?? 0;
 
+                          // Show the feedback strip if this habit came from a guidance
+                          // recommendation, is at least 3 days old, and hasn't been rated yet.
+                          final hasSource = (data['sourceAdvice']?.toString().isNotEmpty ?? false);
+                          final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+                          final ageDays = createdAt == null
+                              ? 0
+                              : DateTime.now().difference(createdAt).inDays;
+                          final unrated = data['feedbackStatus'] == null;
+                          final showFeedback = hasSource && ageDays >= 3 && unrated;
+
                           return HabitCard(
                             title: data['title'] ?? '',
                             category: data['category'] ?? 'custom',
@@ -347,6 +582,9 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
                                 ),
                               );
                             },
+                            showFeedbackPrompt: showFeedback,
+                            onFeedbackSuccess: () => _markFeedback(habitId, 'success'),
+                            onFeedbackStruggled: () => _handleStruggled(habitId, data),
                           );
                         },
                       );
@@ -376,6 +614,99 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
         },
       ),
     );
+  }
+
+  Widget _buildSignInRequired() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: const Color(0xFFDCFCE7),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: const Icon(Icons.lock_outline_rounded, size: 48, color: Color(0xFF15803D)),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Sign in to track habits',
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Color(0xFF064E3B)),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'Your habits and streaks are stored with your account.\nSign in from the Profile tab to get started.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: Color(0xFF6B7280), height: 1.5),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorState(Object? err) {
+    final msg = err?.toString() ?? 'Unknown error';
+    final isIndexError = msg.toLowerCase().contains('requires an index');
+    final indexUrl = isIndexError ? _extractUrl(msg) : null;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEE2E2),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: const Icon(Icons.cloud_off_rounded, size: 48, color: Color(0xFFDC2626)),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Could not load habits',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF064E3B)),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              msg,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280), height: 1.4),
+            ),
+            if (indexUrl != null) ...[
+              const SizedBox(height: 12),
+              SelectableText(
+                indexUrl,
+                style: const TextStyle(fontSize: 11, color: Color(0xFF2563EB)),
+              ),
+            ],
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () => setState(() {}),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF15803D),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String? _extractUrl(String text) {
+    final match = RegExp(r'https?://[^\s]+').firstMatch(text);
+    return match?.group(0);
   }
 
   Widget _buildEmptyState() {

@@ -12,6 +12,11 @@ class HabitCard extends StatefulWidget {
   final VoidCallback onToggle;
   final VoidCallback onTap;
 
+  // Feedback-loop props (only relevant for habits created from a guidance bullet)
+  final bool showFeedbackPrompt;
+  final VoidCallback? onFeedbackSuccess;
+  final VoidCallback? onFeedbackStruggled;
+
   const HabitCard({
     super.key,
     required this.title,
@@ -23,6 +28,9 @@ class HabitCard extends StatefulWidget {
     required this.weeklyStatus,
     required this.onToggle,
     required this.onTap,
+    this.showFeedbackPrompt = false,
+    this.onFeedbackSuccess,
+    this.onFeedbackStruggled,
   });
 
   @override
@@ -76,7 +84,19 @@ class _HabitCardState extends State<HabitCard> with SingleTickerProviderStateMix
             ),
           ],
         ),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildMainRow(),
+            if (widget.showFeedbackPrompt) _buildFeedbackStrip(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMainRow() {
+    return Row(
           children: [
             // Icon circle
             Container(
@@ -162,7 +182,53 @@ class _HabitCardState extends State<HabitCard> with SingleTickerProviderStateMix
               ),
             ),
           ],
-        ),
+    );
+  }
+
+  Widget _buildFeedbackStrip() {
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF3C7),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFFDE68A)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.help_outline_rounded, size: 18, color: Color(0xFF92400E)),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'Is this helping?',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF92400E),
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: widget.onFeedbackSuccess,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFF15803D),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 32),
+              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+            child: const Text('Success'),
+          ),
+          TextButton(
+            onPressed: widget.onFeedbackStruggled,
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFDC2626),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              minimumSize: const Size(0, 32),
+              textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+            child: const Text('Need alternative'),
+          ),
+        ],
       ),
     );
   }
