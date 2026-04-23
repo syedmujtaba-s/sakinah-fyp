@@ -190,19 +190,26 @@ def sync_new_stories():
 # =========================================================
 #  SEARCH — find relevant stories via chunks
 # =========================================================
-def search_stories(journal_entry: str, emotion: str, limit: int = 3) -> list:
+def search_stories(
+    journal_entry: str,
+    emotion: str,
+    limit: int = 3,
+    exclude_story_ids: list | None = None,
+) -> list:
     """
     Search for relevant stories using chunk-level matching.
 
     1. Embeds the query (emotion + journal text)
     2. Searches chunks via Atlas Vector Search (falls back to local cosine)
     3. Deduplicates by story_id, keeping the best chunk score per story
-    4. Returns full story documents sorted by best match
+    4. Filters out any story_id in exclude_story_ids (used by the "need alternative" flow)
+    5. Returns full story documents sorted by best match
     """
+    exclude_set = set(exclude_story_ids or [])
     enriched_query = f"Emotion: {emotion}. {journal_entry}"
     query_embedding = embedder_encode(enriched_query)
 
-    print(f"Searching for emotion '{emotion}': {journal_entry[:80]}...")
+    print(f"Searching for emotion '{emotion}': {journal_entry[:80]}... (excluding {len(exclude_set)} stories)")
 
     # We fetch more chunks than needed since multiple chunks may be from the same story
     chunk_limit = limit * 4
@@ -256,7 +263,11 @@ def search_stories(journal_entry: str, emotion: str, limit: int = 3) -> list:
             atlas_available = False
 
     if not atlas_available or not results:
-        return _local_search(query_embedding, emotion, limit)
+        return _local_search(query_embedding, emotion, limit, exclude_set)
+
+    # Filter out excluded story IDs before dedup
+    if exclude_set:
+        results = [r for r in results if r.get("story_id") not in exclude_set]
 
     # Deduplicate: keep the best score per story_id
     return _dedupe_and_fetch(results, limit)
@@ -306,11 +317,18 @@ def _dedupe_and_fetch(chunk_results: list, limit: int) -> list:
     return matched_stories
 
 
-def _local_search(query_embedding: list, emotion: str, limit: int = 3) -> list:
+def _local_search(
+    query_embedding: list,
+    emotion: str,
+    limit: int = 3,
+    exclude_set: set | None = None,
+) -> list:
     """
     Fallback cosine similarity search when Atlas Vector Search is unavailable.
-    Searches all chunks, deduplicates by story_id.
+    Searches all chunks, deduplicates by story_id, honors excluded story IDs.
     """
+    exclude_set = exclude_set or set()
+
     docs = list(story_index_collection.find({"emotions": emotion.lower()}))
     if not docs:
         docs = list(story_index_collection.find({}))
@@ -323,13 +341,16 @@ def _local_search(query_embedding: list, emotion: str, limit: int = 3) -> list:
     # Score every chunk
     scored_chunks = []
     for doc in docs:
+        sid = doc.get("story_id")
+        if sid in exclude_set:
+            continue
         emb = np.array(doc.get("embedding", []))
         if emb.size == 0:
             continue
         cos_sim = float(
             np.dot(query_vec, emb) / (np.linalg.norm(query_vec) * np.linalg.norm(emb) + 1e-10)
         )
-        scored_chunks.append({"story_id": doc.get("story_id"), "score": cos_sim})
+        scored_chunks.append({"story_id": sid, "score": cos_sim})
 
     # Deduplicate and fetch
     return _dedupe_and_fetch(scored_chunks, limit)

@@ -97,8 +97,12 @@ async def get_guidance(request: GuidanceRequest):
     # Crisis check — before any RAG/LLM work
     is_crisis = _detect_crisis(request.journal_entry)
 
-    # RAG retrieval
-    stories = search_stories(request.journal_entry, emotion)
+    # RAG retrieval — honoring any stories the user has already tried and flagged as unhelpful
+    stories = search_stories(
+        request.journal_entry,
+        emotion,
+        exclude_story_ids=request.exclude_story_ids,
+    )
     if not stories:
         raise HTTPException(
             status_code=404,
@@ -166,6 +170,7 @@ async def get_guidance(request: GuidanceRequest):
 
     if ai_result:
         result = {
+            "story_id": best_story.get("_id", ""),
             "story_title": best_story.get("title", ""),
             "story_period": best_story.get("period", ""),
             "story_summary": best_story.get("summary", ""),
@@ -178,6 +183,7 @@ async def get_guidance(request: GuidanceRequest):
         }
     else:
         result = {
+            "story_id": best_story.get("_id", ""),
             "story_title": best_story.get("title", ""),
             "story_period": best_story.get("period", ""),
             "story_summary": best_story.get("summary", ""),
