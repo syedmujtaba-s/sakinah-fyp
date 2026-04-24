@@ -17,6 +17,11 @@ class HabitCard extends StatefulWidget {
   final VoidCallback? onFeedbackSuccess;
   final VoidCallback? onFeedbackStruggled;
 
+  // Weekly-frequency props. When weeklyTarget > 0, the card shows
+  // "done/target this week" under the title instead of relying on streak alone.
+  final int weeklyTarget;
+  final int weeklyDone;
+
   const HabitCard({
     super.key,
     required this.title,
@@ -31,6 +36,8 @@ class HabitCard extends StatefulWidget {
     this.showFeedbackPrompt = false,
     this.onFeedbackSuccess,
     this.onFeedbackStruggled,
+    this.weeklyTarget = 0,
+    this.weeklyDone = 0,
   });
 
   @override
@@ -70,19 +77,12 @@ class _HabitCardState extends State<HabitCard> with SingleTickerProviderStateMix
     return GestureDetector(
       onTap: widget.onTap,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: Colors.grey.shade200),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.03),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -96,24 +96,27 @@ class _HabitCardState extends State<HabitCard> with SingleTickerProviderStateMix
   }
 
   Widget _buildMainRow() {
+    final showWeeklyProgress = widget.weeklyTarget > 0;
+
     return Row(
           children: [
-            // Icon circle
+            // Icon — smaller, flush
             Container(
-              width: 44,
-              height: 44,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 color: widget.color.withOpacity(0.12),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(widget.icon, color: widget.color, size: 22),
+              child: Icon(widget.icon, color: widget.color, size: 18),
             ),
-            const SizedBox(width: 14),
+            const SizedBox(width: 10),
 
-            // Title + category + weekly dots
+            // Title + optional inline meta (streak, weekly progress), dots below
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Row(
                     children: [
@@ -121,48 +124,57 @@ class _HabitCardState extends State<HabitCard> with SingleTickerProviderStateMix
                         child: Text(
                           widget.title,
                           style: const TextStyle(
-                            fontSize: 15,
+                            fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF1F2937),
                           ),
                           overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
                       ),
                       if (widget.streak > 0) ...[
                         const SizedBox(width: 6),
-                        const Text('🔥', style: TextStyle(fontSize: 12)),
+                        const Text('🔥', style: TextStyle(fontSize: 11)),
                         const SizedBox(width: 2),
                         Text(
                           '${widget.streak}',
                           style: const TextStyle(
-                            fontSize: 12,
+                            fontSize: 11,
                             fontWeight: FontWeight.bold,
                             color: Color(0xFFEA580C),
                           ),
                         ),
                       ],
+                      if (showWeeklyProgress) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          '${widget.weeklyDone}/${widget.weeklyTarget}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: widget.weeklyDone >= widget.weeklyTarget
+                                ? const Color(0xFF15803D)
+                                : const Color(0xFF6B7280),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    widget.category[0].toUpperCase() + widget.category.substring(1),
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
-                  ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   WeeklyDots(days: widget.weeklyStatus),
                 ],
               ),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
 
-            // Checkbox
+            // Checkbox — smaller to match the compact row
             GestureDetector(
               onTap: _handleToggle,
               child: ScaleTransition(
                 scale: _scaleAnim,
                 child: Container(
-                  width: 32,
-                  height: 32,
+                  width: 28,
+                  height: 28,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: widget.completedToday
@@ -176,7 +188,7 @@ class _HabitCardState extends State<HabitCard> with SingleTickerProviderStateMix
                     ),
                   ),
                   child: widget.completedToday
-                      ? const Icon(Icons.check, color: Colors.white, size: 18)
+                      ? const Icon(Icons.check, color: Colors.white, size: 16)
                       : null,
                 ),
               ),

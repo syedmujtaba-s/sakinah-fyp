@@ -192,6 +192,8 @@ class _RemindersScreenState extends State<RemindersScreen> {
         ),
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.white,
         iconTheme: const IconThemeData(color: Color(0xFF15803D)),
       ),
       body: _loading

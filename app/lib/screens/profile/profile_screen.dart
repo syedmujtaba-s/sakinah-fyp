@@ -341,6 +341,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       backgroundColor: Colors.white,
       appBar: AppBar(
         elevation: 0,
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.white,
         backgroundColor: Colors.white,
         automaticallyImplyLeading: false,
         title: const Text(

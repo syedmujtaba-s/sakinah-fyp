@@ -24,6 +24,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
         title: const Text("Community", style: TextStyle(color: Color(0xFF15803D), fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.white,
         automaticallyImplyLeading: false,
         actions: [
           Padding(

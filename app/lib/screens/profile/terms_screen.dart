@@ -34,6 +34,8 @@ class TermsScreen extends StatelessWidget {
         title: const Text("Terms of Use", style: TextStyle(color: Color(0xFF15803D), fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),

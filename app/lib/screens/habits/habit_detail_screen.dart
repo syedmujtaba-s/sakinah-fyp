@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:fl_chart/fl_chart.dart';
+import '../../services/notification_service.dart';
 import 'habit_tracker_screen.dart' show getHabitIcon, getHabitColor, dateStr;
 import 'add_habit_screen.dart';
 
@@ -20,6 +21,7 @@ class HabitDetailScreen extends StatefulWidget {
 }
 
 class _HabitDetailScreenState extends State<HabitDetailScreen> {
+  String? get _uidOrNull => FirebaseAuth.instance.currentUser?.uid;
   String get _uid => FirebaseAuth.instance.currentUser!.uid;
 
   int _currentStreak = 0;
@@ -27,6 +29,7 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
   double _completionRate = 0;
   List<bool> _last30Days = List.filled(30, false);
   bool _loading = true;
+  String? _loadError;
 
   @override
   void initState() {
@@ -35,64 +38,81 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
   }
 
   Future<void> _loadStats() async {
+    final uid = _uidOrNull;
+    if (uid == null) {
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+
     final now = DateTime.now();
-    final logs = <String, bool>{};
+    final cutoff = dateStr(now.subtract(const Duration(days: 89)));
 
-    // Fetch last 90 days of logs for this habit
-    for (int i = 0; i < 90; i++) {
-      final date = now.subtract(Duration(days: i));
-      final logId = '${dateStr(date)}_${widget.habitId}';
-      final doc = await FirebaseFirestore.instance
+    try {
+      // Single batched query: all habitLogs for this habit in the last 90 days.
+      // Replaces the previous 90-round-trip loop that stalled on slow networks.
+      final snap = await FirebaseFirestore.instance
           .collection('users')
-          .doc(_uid)
+          .doc(uid)
           .collection('habitLogs')
-          .doc(logId)
+          .where('habitId', isEqualTo: widget.habitId)
+          .where('date', isGreaterThanOrEqualTo: cutoff)
           .get();
-      logs[dateStr(date)] = doc.exists && (doc.data()?['completed'] == true);
-    }
 
-    // Last 30 days (index 0 = 29 days ago, index 29 = today)
-    final last30 = <bool>[];
-    for (int i = 29; i >= 0; i--) {
-      final date = now.subtract(Duration(days: i));
-      last30.add(logs[dateStr(date)] ?? false);
-    }
-
-    // Current streak
-    int currentStreak = 0;
-    for (int i = 0; i < 90; i++) {
-      final date = now.subtract(Duration(days: i));
-      if (logs[dateStr(date)] == true) {
-        currentStreak++;
-      } else {
-        if (i == 0) continue; // Today might not be done yet
-        break;
+      final doneDates = <String>{};
+      for (final d in snap.docs) {
+        final data = d.data();
+        if (data['completed'] != true) continue;
+        final date = data['date']?.toString();
+        if (date != null && date.isNotEmpty) doneDates.add(date);
       }
-    }
 
-    // Best streak (scan all 90 days)
-    int bestStreak = 0;
-    int tempStreak = 0;
-    for (int i = 89; i >= 0; i--) {
-      final date = now.subtract(Duration(days: i));
-      if (logs[dateStr(date)] == true) {
-        tempStreak++;
-        if (tempStreak > bestStreak) bestStreak = tempStreak;
-      } else {
-        tempStreak = 0;
+      // Last 30 days (index 0 = 29 days ago, index 29 = today)
+      final last30 = <bool>[];
+      for (int i = 29; i >= 0; i--) {
+        final date = now.subtract(Duration(days: i));
+        last30.add(doneDates.contains(dateStr(date)));
       }
-    }
 
-    // Completion rate (last 30 days)
-    final completedDays = last30.where((b) => b).length;
-    final rate = completedDays / 30 * 100;
+      // Current streak
+      int currentStreak = 0;
+      for (int i = 0; i < 90; i++) {
+        final date = now.subtract(Duration(days: i));
+        if (doneDates.contains(dateStr(date))) {
+          currentStreak++;
+        } else {
+          if (i == 0) continue;
+          break;
+        }
+      }
 
-    if (mounted) {
+      // Best streak
+      int bestStreak = 0;
+      int tempStreak = 0;
+      for (int i = 89; i >= 0; i--) {
+        final date = now.subtract(Duration(days: i));
+        if (doneDates.contains(dateStr(date))) {
+          tempStreak++;
+          if (tempStreak > bestStreak) bestStreak = tempStreak;
+        } else {
+          tempStreak = 0;
+        }
+      }
+
+      final completedDays = last30.where((b) => b).length;
+      final rate = completedDays / 30 * 100;
+
+      if (!mounted) return;
       setState(() {
         _currentStreak = currentStreak;
         _bestStreak = bestStreak;
         _completionRate = rate;
         _last30Days = last30;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = e.toString();
         _loading = false;
       });
     }
@@ -102,8 +122,10 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Delete Habit'),
-        content: Text('Are you sure you want to delete "${widget.habitData['title']}"? This cannot be undone.'),
+        title: const Text('Archive Habit'),
+        content: Text(
+          'Archive "${widget.habitData['title']}"? It will be hidden from your list but you can restore it from the Archived screen. Your history is kept.',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -111,19 +133,26 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
+            child: const Text('Archive', style: TextStyle(color: Color(0xFFDC2626))),
           ),
         ],
       ),
     );
 
     if (confirmed == true) {
+      // Soft-delete: list stream already filters by isActive=true, so the habit
+      // disappears from the tracker but the doc + its habitLogs remain intact.
       await FirebaseFirestore.instance
           .collection('users')
           .doc(_uid)
           .collection('habits')
           .doc(widget.habitId)
-          .delete();
+          .update({
+        'isActive': false,
+        'archivedAt': FieldValue.serverTimestamp(),
+      });
+      // Stop the daily reminder so archived habits don't still ping the user.
+      await NotificationService.instance.cancelHabitReminder(widget.habitId);
       if (mounted) Navigator.pop(context);
     }
   }
@@ -141,6 +170,8 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
         title: Text(title, style: const TextStyle(color: Color(0xFF15803D), fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.white,
         iconTheme: const IconThemeData(color: Color(0xFF15803D)),
         actions: [
           IconButton(
@@ -161,7 +192,9 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(color: Color(0xFF15803D)))
-          : SingleChildScrollView(
+          : _loadError != null
+              ? _buildErrorState()
+              : SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -303,8 +336,8 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
                   Center(
                     child: TextButton.icon(
                       onPressed: _deleteHabit,
-                      icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
-                      label: const Text('Delete Habit', style: TextStyle(color: Colors.red)),
+                      icon: const Icon(Icons.archive_outlined, color: Colors.red, size: 20),
+                      label: const Text('Archive Habit', style: TextStyle(color: Colors.red)),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -424,6 +457,65 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
             );
           }),
         ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 100,
+              height: 100,
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEE2E2),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: const Icon(Icons.cloud_off_rounded,
+                  size: 48, color: Color(0xFFDC2626)),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Could not load stats',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF064E3B),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _loadError ?? 'Unknown error',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 12,
+                color: Color(0xFF6B7280),
+                height: 1.4,
+              ),
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () {
+                setState(() {
+                  _loading = true;
+                  _loadError = null;
+                });
+                _loadStats();
+              },
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF15803D),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

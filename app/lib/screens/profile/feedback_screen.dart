@@ -57,6 +57,8 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
         title: const Text("Send Feedback", style: TextStyle(color: Color(0xFF15803D), fontWeight: FontWeight.bold)),
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),

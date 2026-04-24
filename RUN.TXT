@@ -3,6 +3,7 @@
 after aevery restar or plug unplug
 adb reverse tcp:8000 tcp:8000
 
+adb connect 192.168.1.103:41301 && adb devices
 
 
 Backend:

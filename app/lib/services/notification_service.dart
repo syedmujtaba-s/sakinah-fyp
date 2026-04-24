@@ -175,4 +175,43 @@ class NotificationService {
       minute: 0,
     );
   }
+
+  // ─── Per-habit reminders ───
+  //
+  // Each habit maps to a stable notification ID derived from its Firestore
+  // doc id. Hashing keeps us under Android's 32-bit signed int limit and
+  // well clear of the general reminder IDs above.
+
+  static const int _perHabitBase = 10000;
+
+  /// Derive a stable notification ID from a habit doc id. Range:
+  /// [_perHabitBase, _perHabitBase + 900_000_000), so it never collides with
+  /// the general reminders (1000-1004).
+  int _habitNotifId(String habitId) {
+    // Simple stable hash — deterministic across runs.
+    var h = 0;
+    for (final code in habitId.codeUnits) {
+      h = (h * 31 + code) & 0x3FFFFFFF;
+    }
+    return _perHabitBase + h % 900000000;
+  }
+
+  Future<void> scheduleHabitReminder({
+    required String habitId,
+    required String habitTitle,
+    required int hour,
+    required int minute,
+  }) async {
+    await scheduleDailyNotification(
+      id: _habitNotifId(habitId),
+      title: habitTitle,
+      body: 'Time for $habitTitle — small, consistent steps.',
+      hour: hour,
+      minute: minute,
+    );
+  }
+
+  Future<void> cancelHabitReminder(String habitId) async {
+    await cancelNotification(_habitNotifId(habitId));
+  }
 }

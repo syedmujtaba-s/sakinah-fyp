@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../services/notification_service.dart';
 import 'habit_tracker_screen.dart' show habitIconMap;
 
 class AddHabitScreen extends StatefulWidget {
@@ -19,7 +20,10 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
   String _selectedIcon = 'star';
   String _selectedColor = '#15803D';
   String _frequency = 'daily';
+  int _targetPerWeek = 3; // only applies when frequency == 'weekly'
   bool _saving = false;
+  // Optional daily reminder time. null = no reminder.
+  TimeOfDay? _reminderTime;
 
   bool get _isEditing => widget.habitId != null;
 
@@ -51,6 +55,13 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
       _selectedIcon = widget.habitData!['icon'] ?? 'star';
       _selectedColor = widget.habitData!['color'] ?? '#15803D';
       _frequency = widget.habitData!['frequency'] ?? 'daily';
+      final tpw = widget.habitData!['targetPerWeek'];
+      if (tpw is int && tpw >= 1 && tpw <= 7) _targetPerWeek = tpw;
+      final h = widget.habitData!['reminderHour'];
+      final m = widget.habitData!['reminderMinute'];
+      if (h is int && m is int && h >= 0 && h < 24 && m >= 0 && m < 60) {
+        _reminderTime = TimeOfDay(hour: h, minute: m);
+      }
     }
   }
 
@@ -80,25 +91,36 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
     setState(() => _saving = true);
 
     final uid = FirebaseAuth.instance.currentUser!.uid;
-    final data = {
+    final data = <String, dynamic>{
       'title': title,
       'category': _category,
       'icon': _selectedIcon,
       'color': _selectedColor,
       'frequency': _frequency,
       'isActive': true,
+      if (_frequency == 'weekly') 'targetPerWeek': _targetPerWeek,
+      if (_reminderTime != null) 'reminderHour': _reminderTime!.hour,
+      if (_reminderTime != null) 'reminderMinute': _reminderTime!.minute,
     };
 
     try {
+      String habitId;
       if (_isEditing) {
+        // On edit, explicitly clear fields that should no longer apply.
+        if (_frequency != 'weekly') data['targetPerWeek'] = FieldValue.delete();
+        if (_reminderTime == null) {
+          data['reminderHour'] = FieldValue.delete();
+          data['reminderMinute'] = FieldValue.delete();
+        }
         await FirebaseFirestore.instance
             .collection('users')
             .doc(uid)
             .collection('habits')
             .doc(widget.habitId)
             .update(data);
+        habitId = widget.habitId!;
       } else {
-        await FirebaseFirestore.instance
+        final ref = await FirebaseFirestore.instance
             .collection('users')
             .doc(uid)
             .collection('habits')
@@ -106,6 +128,20 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
           ...data,
           'createdAt': FieldValue.serverTimestamp(),
         });
+        habitId = ref.id;
+      }
+
+      // Schedule/cancel the local reminder to match the doc's current state.
+      if (_reminderTime != null) {
+        await NotificationService.instance.requestPermission();
+        await NotificationService.instance.scheduleHabitReminder(
+          habitId: habitId,
+          habitTitle: title,
+          hour: _reminderTime!.hour,
+          minute: _reminderTime!.minute,
+        );
+      } else {
+        await NotificationService.instance.cancelHabitReminder(habitId);
       }
 
       if (mounted) Navigator.pop(context);
@@ -130,6 +166,8 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
         ),
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.white,
         iconTheme: const IconThemeData(color: Color(0xFF15803D)),
       ),
       body: SingleChildScrollView(
@@ -273,6 +311,110 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
                 _buildFreqChip('Daily', 'daily'),
                 const SizedBox(width: 12),
                 _buildFreqChip('Weekly', 'weekly'),
+              ],
+            ),
+
+            // Weekly target picker — how many times per week counts as success
+            if (_frequency == 'weekly') ...[
+              const SizedBox(height: 20),
+              const Text(
+                'Target per week',
+                style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'A week is successful when you complete this many days.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+              ),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                children: List.generate(7, (i) {
+                  final target = i + 1;
+                  final selected = _targetPerWeek == target;
+                  return ChoiceChip(
+                    label: Text('$target × /week'),
+                    selected: selected,
+                    onSelected: (_) => setState(() => _targetPerWeek = target),
+                    selectedColor: const Color(0xFFDCFCE7),
+                    backgroundColor: Colors.white,
+                    labelStyle: TextStyle(
+                      color: selected ? const Color(0xFF15803D) : const Color(0xFF6B7280),
+                      fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+                      fontSize: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      side: BorderSide(
+                        color: selected ? const Color(0xFF15803D) : Colors.grey.shade300,
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ],
+            const SizedBox(height: 24),
+
+            // Reminder time — optional; when set, schedules a daily local notification
+            const Text(
+              'Daily reminder',
+              style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF374151)),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () async {
+                      final picked = await showTimePicker(
+                        context: context,
+                        initialTime: _reminderTime ?? const TimeOfDay(hour: 8, minute: 0),
+                      );
+                      if (picked != null) {
+                        setState(() => _reminderTime = picked);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE5E7EB)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.alarm_rounded,
+                              size: 18, color: Color(0xFF15803D)),
+                          const SizedBox(width: 8),
+                          Text(
+                            _reminderTime == null
+                                ? 'No reminder'
+                                : _reminderTime!.format(context),
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: _reminderTime == null
+                                  ? const Color(0xFF9CA3AF)
+                                  : const Color(0xFF1F2937),
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          const Spacer(),
+                          const Icon(Icons.chevron_right_rounded,
+                              size: 18, color: Color(0xFF9CA3AF)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                if (_reminderTime != null) ...[
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Clear reminder',
+                    onPressed: () => setState(() => _reminderTime = null),
+                    icon: const Icon(Icons.close_rounded, color: Color(0xFF6B7280)),
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 40),

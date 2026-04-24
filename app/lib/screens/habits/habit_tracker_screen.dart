@@ -3,8 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../widgets/progress_ring.dart';
 import '../../widgets/habit_card.dart';
+import '../../models/habit_feedback_status.dart';
 import '../journaling_screen.dart';
 import 'add_habit_screen.dart';
+import 'archived_habits_screen.dart';
 import 'habit_detail_screen.dart';
 
 // Shared icon map used by habit tracker and add habit screens
@@ -41,8 +43,26 @@ Color getHabitColor(String hex) {
   }
 }
 
-String dateStr(DateTime d) =>
-    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+// All date keys are the user's LOCAL calendar date (YYYY-MM-DD).
+// Any UTC DateTime (e.g. from Firestore server timestamps) is normalized to
+// the device's local zone first so cross-timezone use doesn't shift the day.
+String dateStr(DateTime d) {
+  final local = d.isUtc ? d.toLocal() : d;
+  return '${local.year}-${local.month.toString().padLeft(2, '0')}-${local.day.toString().padLeft(2, '0')}';
+}
+
+// Calendar-day distance (not millisecond distance). Needed because
+// "createdAt minus now" in inDays can read 0 across an actual midnight
+// crossing, which makes age-based thresholds behave inconsistently.
+int calendarDaysBetween(DateTime from, DateTime to) {
+  final a = DateTime((from.isUtc ? from.toLocal() : from).year,
+      (from.isUtc ? from.toLocal() : from).month,
+      (from.isUtc ? from.toLocal() : from).day);
+  final b = DateTime((to.isUtc ? to.toLocal() : to).year,
+      (to.isUtc ? to.toLocal() : to).month,
+      (to.isUtc ? to.toLocal() : to).day);
+  return b.difference(a).inDays;
+}
 
 class HabitTrackerScreen extends StatefulWidget {
   const HabitTrackerScreen({super.key});
@@ -54,6 +74,10 @@ class HabitTrackerScreen extends StatefulWidget {
 class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
   String _selectedCategory = 'All';
   bool _seeding = false;
+  // Top-level toggle between the two habit sources.
+  bool _showRecommended = false;
+  // Category group keys the user has collapsed in this session.
+  final Set<String> _collapsedGroups = {};
 
   final _categories = ['All', 'Prayer', 'Quran', 'Dhikr', 'Wellness', 'Custom'];
 
@@ -247,7 +271,7 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
   }
 
   // ───── Feedback Loop: mark applied advice as Success / Struggled ─────
-  Future<void> _markFeedback(String habitId, String status) async {
+  Future<void> _markFeedback(String habitId, HabitFeedbackStatus status) async {
     final uid = _uidOrNull;
     if (uid == null) return;
 
@@ -258,13 +282,13 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
           .collection('habits')
           .doc(habitId)
           .update({
-        'feedbackStatus': status,
+        'feedbackStatus': status.wire,
         'feedbackAt': FieldValue.serverTimestamp(),
       });
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(status == 'success'
+          content: Text(status == HabitFeedbackStatus.success
               ? 'MashaAllah — keep going.'
               : 'Thanks for the feedback.'),
           behavior: SnackBarBehavior.floating,
@@ -283,7 +307,7 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
     Map<String, dynamic> habitData,
   ) async {
     // Record the feedback so the strip disappears regardless of what happens next.
-    await _markFeedback(habitId, 'struggled');
+    await _markFeedback(habitId, HabitFeedbackStatus.struggled);
 
     if (!mounted) return;
 
@@ -323,50 +347,8 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
     }
   }
 
-  // ───── Get Weekly Status for a Habit ─────
-  Future<List<bool>> _getWeeklyStatus(String habitId) async {
-    final now = DateTime.now();
-    final results = <bool>[];
-
-    for (int i = 6; i >= 0; i--) {
-      final date = now.subtract(Duration(days: i));
-      final logId = '${dateStr(date)}_$habitId';
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_uid)
-          .collection('habitLogs')
-          .doc(logId)
-          .get();
-      results.add(doc.exists && (doc.data()?['completed'] == true));
-    }
-    return results;
-  }
-
-  // ───── Calculate Streak ─────
-  Future<int> _calculateStreak(String habitId) async {
-    int streak = 0;
-    final now = DateTime.now();
-
-    for (int i = 0; i < 365; i++) {
-      final date = now.subtract(Duration(days: i));
-      final logId = '${dateStr(date)}_$habitId';
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_uid)
-          .collection('habitLogs')
-          .doc(logId)
-          .get();
-
-      if (doc.exists && (doc.data()?['completed'] == true)) {
-        streak++;
-      } else {
-        // If today is not done yet, skip it and keep counting from yesterday
-        if (i == 0) continue;
-        break;
-      }
-    }
-    return streak;
-  }
+  // Streak / weekly helpers live inline in build() and read from a single
+  // 365-day habitLogs stream, so no per-card Firestore round-trips here.
 
   @override
   Widget build(BuildContext context) {
@@ -380,6 +362,8 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
         ),
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.white,
         centerTitle: true,
         automaticallyImplyLeading: false,
         actions: uid == null
@@ -389,8 +373,24 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
                   icon: const Icon(Icons.more_vert, color: Color(0xFF6B7280)),
                   onSelected: (value) {
                     if (value == 'cleanup') _cleanUpDuplicates();
+                    if (value == 'archived') {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ArchivedHabitsScreen()),
+                      );
+                    }
                   },
                   itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: 'archived',
+                      child: Row(
+                        children: [
+                          Icon(Icons.archive_outlined, size: 20, color: Color(0xFF6B7280)),
+                          SizedBox(width: 12),
+                          Text('Archived habits'),
+                        ],
+                      ),
+                    ),
                     PopupMenuItem(
                       value: 'cleanup',
                       child: Row(
@@ -459,50 +459,206 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
                   return cat.toString().toLowerCase() == _selectedCategory.toLowerCase();
                 }).toList();
 
+          // One 365-day habitLogs stream feeds all per-habit calculations
+          // (today, weekly dots, streak). Replaces the previous per-card
+          // FutureBuilder that was doing N*365 doc.get()s on every rebuild.
+          final now = DateTime.now();
+          final todayKey = dateStr(now);
+          final cutoffKey = dateStr(now.subtract(const Duration(days: 365)));
+
           return StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
                 .collection('users')
                 .doc(uid)
                 .collection('habitLogs')
-                .where('date', isEqualTo: _todayStr)
+                .where('date', isGreaterThanOrEqualTo: cutoffKey)
                 .snapshots(),
             builder: (context, logsSnap) {
-              // Log failures degrade gracefully — habits still render, just with no
-              // "completed today" state. Far better than blocking the entire screen.
-              final todayLogs = <String>{};
+              // habitId -> set of YYYY-MM-DD strings where it was completed.
+              // Log failures degrade gracefully — habits still render.
+              final Map<String, Set<String>> doneDates = {};
               if (logsSnap.hasData) {
                 for (final doc in logsSnap.data!.docs) {
                   final data = doc.data() as Map<String, dynamic>;
-                  if (data['completed'] == true) {
-                    todayLogs.add(data['habitId'] as String);
-                  }
+                  if (data['completed'] != true) continue;
+                  final hid = data['habitId']?.toString() ?? '';
+                  final d = data['date']?.toString() ?? '';
+                  if (hid.isEmpty || d.isEmpty) continue;
+                  (doneDates[hid] ??= <String>{}).add(d);
                 }
               }
 
-              final completedCount = habits.where((h) => todayLogs.contains(h.id)).length;
+              bool isDoneToday(String habitId) =>
+                  (doneDates[habitId] ?? const <String>{}).contains(todayKey);
 
-              // Sort: incomplete first, then completed
-              final sortedFiltered = List<QueryDocumentSnapshot>.from(filtered);
-              sortedFiltered.sort((a, b) {
-                final aDone = todayLogs.contains(a.id) ? 1 : 0;
-                final bDone = todayLogs.contains(b.id) ? 1 : 0;
+              List<bool> weeklyOf(String habitId) {
+                final dates = doneDates[habitId] ?? const <String>{};
+                return List<bool>.generate(7, (i) {
+                  final d = now.subtract(Duration(days: 6 - i));
+                  return dates.contains(dateStr(DateTime(d.year, d.month, d.day)));
+                });
+              }
+
+              int dailyStreakOf(String habitId) {
+                final dates = doneDates[habitId] ?? const <String>{};
+                if (dates.isEmpty) return 0;
+                int streak = 0;
+                var cursor = DateTime(now.year, now.month, now.day);
+                if (!dates.contains(dateStr(cursor))) {
+                  // Today not done yet — count from yesterday.
+                  cursor = cursor.subtract(const Duration(days: 1));
+                }
+                while (dates.contains(dateStr(cursor))) {
+                  streak++;
+                  cursor = cursor.subtract(const Duration(days: 1));
+                  if (streak > 365) break;
+                }
+                return streak;
+              }
+
+              // Start of the user's local week (Monday 00:00)
+              DateTime startOfWeek(DateTime d) {
+                final local = d.isUtc ? d.toLocal() : d;
+                final daysFromMonday = (local.weekday - DateTime.monday) % 7;
+                return DateTime(local.year, local.month, local.day)
+                    .subtract(Duration(days: daysFromMonday));
+              }
+
+              int weeklyDoneCount(String habitId, DateTime weekStart) {
+                final dates = doneDates[habitId] ?? const <String>{};
+                int count = 0;
+                for (int i = 0; i < 7; i++) {
+                  final d = weekStart.add(Duration(days: i));
+                  if (dates.contains(dateStr(d))) count++;
+                }
+                return count;
+              }
+
+              // Counts consecutive past weeks (Mon-Sun) where weeklyDone >= target.
+              // The current week is skipped if the target isn't hit yet (matches
+              // daily-streak semantics: "don't punish me for today not being over").
+              int weeklyStreakOf(String habitId, int target) {
+                if (target <= 0) return 0;
+                int streak = 0;
+                var weekStart = startOfWeek(now);
+                if (weeklyDoneCount(habitId, weekStart) < target) {
+                  weekStart = weekStart.subtract(const Duration(days: 7));
+                }
+                while (weeklyDoneCount(habitId, weekStart) >= target) {
+                  streak++;
+                  weekStart = weekStart.subtract(const Duration(days: 7));
+                  if (streak > 104) break; // two years of weeks — enough
+                }
+                return streak;
+              }
+
+              final completedCount =
+                  habits.where((h) => isDoneToday(h.id)).length;
+
+              // Partition: Recommended (guidance-sourced) vs My Habits.
+              final List<QueryDocumentSnapshot> recommendations = [];
+              final List<QueryDocumentSnapshot> myHabits = [];
+              for (final doc in filtered) {
+                final data = doc.data() as Map<String, dynamic>;
+                final hasSource =
+                    (data['sourceAdvice']?.toString().isNotEmpty ?? false);
+                if (hasSource) {
+                  recommendations.add(doc);
+                } else {
+                  myHabits.add(doc);
+                }
+              }
+
+              int sortByDone(QueryDocumentSnapshot a, QueryDocumentSnapshot b) {
+                final aDone = isDoneToday(a.id) ? 1 : 0;
+                final bDone = isDoneToday(b.id) ? 1 : 0;
                 return aDone.compareTo(bDone);
-              });
+              }
+              myHabits.sort(sortByDone);
+              recommendations.sort(sortByDone);
+
+              Widget buildCard(QueryDocumentSnapshot doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final habitId = doc.id;
+                final isDone = isDoneToday(habitId);
+
+                final hasSource =
+                    (data['sourceAdvice']?.toString().isNotEmpty ?? false);
+                final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+                final ageDays = createdAt == null
+                    ? 0
+                    : calendarDaysBetween(createdAt, DateTime.now());
+                final feedback = HabitFeedbackStatus.fromWire(data['feedbackStatus']);
+                final showFeedback =
+                    hasSource && ageDays >= 3 && feedback == HabitFeedbackStatus.none;
+
+                // Frequency-aware streak and progress
+                final isWeekly = (data['frequency']?.toString() ?? 'daily') == 'weekly';
+                final rawTarget = data['targetPerWeek'];
+                final target = (isWeekly && rawTarget is int) ? rawTarget : 0;
+                final streak = isWeekly
+                    ? weeklyStreakOf(habitId, target)
+                    : dailyStreakOf(habitId);
+                final weeklyDone = isWeekly
+                    ? weeklyDoneCount(habitId, startOfWeek(now))
+                    : 0;
+
+                return HabitCard(
+                  title: data['title'] ?? '',
+                  category: data['category'] ?? 'custom',
+                  icon: getHabitIcon(data['icon'] ?? ''),
+                  color: getHabitColor(data['color'] ?? '#15803D'),
+                  streak: streak,
+                  completedToday: isDone,
+                  weeklyStatus: weeklyOf(habitId),
+                  weeklyTarget: target,
+                  weeklyDone: weeklyDone,
+                  onToggle: () => _toggleHabit(habitId, isDone),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => HabitDetailScreen(
+                          habitId: habitId,
+                          habitData: data,
+                        ),
+                      ),
+                    );
+                  },
+                  showFeedbackPrompt: showFeedback,
+                  onFeedbackSuccess: () => _markFeedback(habitId, HabitFeedbackStatus.success),
+                  onFeedbackStruggled: () => _handleStruggled(habitId, data),
+                );
+              }
+
+              final activeList = _showRecommended ? recommendations : myHabits;
 
               return SingleChildScrollView(
                 padding: const EdgeInsets.all(20),
                 child: Column(
                   children: [
-                    // Progress Ring
-                    ProgressRing(completed: completedCount, total: habits.length),
+                    Center(
+                      child: ProgressRing(
+                        completed: completedCount,
+                        total: habits.length,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       completedCount == habits.length
                           ? 'MashaAllah! All done today!'
                           : 'Keep going, you\'re doing great!',
+                      textAlign: TextAlign.center,
                       style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280)),
                     ),
                     const SizedBox(height: 20),
+
+                    // Segmented toggle: My Habits  |  Recommended
+                    _buildSegmentedToggle(
+                      myCount: myHabits.length,
+                      recCount: recommendations.length,
+                    ),
+                    const SizedBox(height: 16),
 
                     // Category filter chips
                     SizedBox(
@@ -537,73 +693,47 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Habit cards
-                    ...sortedFiltered.map((doc) {
-                      final data = doc.data() as Map<String, dynamic>;
-                      final habitId = doc.id;
-                      final isDone = todayLogs.contains(habitId);
+                    if (activeList.isEmpty)
+                      _buildSectionEmpty(
+                        _showRecommended
+                            ? 'When you reflect and receive guidance, tap “Track” on any practical advice to see it here.'
+                            : (_selectedCategory == 'All'
+                                ? 'No personal habits yet. Tap + to add one.'
+                                : 'No $_selectedCategory habits in this view.'),
+                      )
+                    else
+                      ..._buildGroupedHabits(activeList, buildCard),
 
-                      return FutureBuilder<List<dynamic>>(
-                        future: Future.wait([
-                          _getWeeklyStatus(habitId),
-                          _calculateStreak(habitId),
-                        ]),
-                        builder: (context, snap) {
-                          final weekly = (snap.data?[0] as List<bool>?) ?? List.filled(7, false);
-                          final streak = (snap.data?[1] as int?) ?? 0;
-
-                          // Show the feedback strip if this habit came from a guidance
-                          // recommendation, is at least 3 days old, and hasn't been rated yet.
-                          final hasSource = (data['sourceAdvice']?.toString().isNotEmpty ?? false);
-                          final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
-                          final ageDays = createdAt == null
-                              ? 0
-                              : DateTime.now().difference(createdAt).inDays;
-                          final unrated = data['feedbackStatus'] == null;
-                          final showFeedback = hasSource && ageDays >= 3 && unrated;
-
-                          return HabitCard(
-                            title: data['title'] ?? '',
-                            category: data['category'] ?? 'custom',
-                            icon: getHabitIcon(data['icon'] ?? ''),
-                            color: getHabitColor(data['color'] ?? '#15803D'),
-                            streak: streak,
-                            completedToday: isDone,
-                            weeklyStatus: weekly,
-                            onToggle: () => _toggleHabit(habitId, isDone),
-                            onTap: () {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => HabitDetailScreen(
-                                    habitId: habitId,
-                                    habitData: data,
-                                  ),
+                    // All-done-today footer — shown when every habit is checked off
+                    if (habits.isNotEmpty &&
+                        completedCount == habits.length &&
+                        activeList.isNotEmpty) ...[
+                      const SizedBox(height: 24),
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFDCFCE7),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: const Color(0xFFBBF7D0)),
+                        ),
+                        child: Row(
+                          children: const [
+                            Text('🌙', style: TextStyle(fontSize: 20)),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'See you tomorrow, insha\'Allah.',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: Color(0xFF166534),
+                                  fontWeight: FontWeight.w600,
                                 ),
-                              );
-                            },
-                            showFeedbackPrompt: showFeedback,
-                            onFeedbackSuccess: () => _markFeedback(habitId, 'success'),
-                            onFeedbackStruggled: () => _handleStruggled(habitId, data),
-                          );
-                        },
-                      );
-                    }),
-
-                    if (sortedFiltered.isEmpty && _selectedCategory != 'All')
-                      Padding(
-                        padding: const EdgeInsets.only(top: 40),
-                        child: Column(
-                          children: [
-                            Icon(Icons.filter_list_off, size: 48, color: Colors.grey.shade300),
-                            const SizedBox(height: 12),
-                            Text(
-                              'No $_selectedCategory habits yet',
-                              style: const TextStyle(color: Color(0xFF9CA3AF)),
+                              ),
                             ),
                           ],
                         ),
                       ),
+                    ],
 
                     const SizedBox(height: 80), // FAB clearance
                   ],
@@ -612,6 +742,227 @@ class _HabitTrackerScreenState extends State<HabitTrackerScreen> {
             },
           );
         },
+      ),
+    );
+  }
+
+  // Group the active habits by category and render each group with a
+  // collapsible header. Keeps the compact list from turning into one long
+  // scroll when users have 10+ seeded habits.
+  List<Widget> _buildGroupedHabits(
+    List<QueryDocumentSnapshot> habits,
+    Widget Function(QueryDocumentSnapshot) buildCard,
+  ) {
+    // Preserve original ordering within a group. Category keys are normalized.
+    final groups = <String, List<QueryDocumentSnapshot>>{};
+    for (final doc in habits) {
+      final data = doc.data() as Map<String, dynamic>;
+      final rawCat = (data['category']?.toString() ?? 'custom').trim();
+      final key = rawCat.isEmpty ? 'custom' : rawCat.toLowerCase();
+      (groups[key] ??= []).add(doc);
+    }
+
+    // Fixed order first, then any unknown categories after in insertion order.
+    const priority = ['prayer', 'quran', 'dhikr', 'wellness', 'custom', 'guidance'];
+    final ordered = <String>[
+      ...priority.where(groups.containsKey),
+      ...groups.keys.where((k) => !priority.contains(k)),
+    ];
+
+    // If only a single group ends up rendering (user is filtering to Prayer
+    // etc.), skip the headers entirely — they'd just add noise.
+    if (ordered.length <= 1) {
+      return habits.map(buildCard).toList();
+    }
+
+    final widgets = <Widget>[];
+    for (final key in ordered) {
+      final list = groups[key]!;
+      final collapsed = _collapsedGroups.contains(key);
+      final label = key[0].toUpperCase() + key.substring(1);
+
+      widgets.add(_buildCategoryGroupHeader(
+        label: label,
+        count: list.length,
+        collapsed: collapsed,
+        onTap: () => setState(() {
+          if (collapsed) {
+            _collapsedGroups.remove(key);
+          } else {
+            _collapsedGroups.add(key);
+          }
+        }),
+      ));
+      if (!collapsed) {
+        widgets.addAll(list.map(buildCard));
+      }
+      widgets.add(const SizedBox(height: 6));
+    }
+    return widgets;
+  }
+
+  Widget _buildCategoryGroupHeader({
+    required String label,
+    required int count,
+    required bool collapsed,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        child: Row(
+          children: [
+            AnimatedRotation(
+              turns: collapsed ? -0.25 : 0,
+              duration: const Duration(milliseconds: 150),
+              child: const Icon(
+                Icons.keyboard_arrow_down_rounded,
+                size: 20,
+                color: Color(0xFF6B7280),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Color(0xFF374151),
+                letterSpacing: 0.2,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+              decoration: BoxDecoration(
+                color: const Color(0xFFF3F4F6),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$count',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF6B7280),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSegmentedToggle({
+    required int myCount,
+    required int recCount,
+  }) {
+    Widget segment({
+      required String label,
+      required int count,
+      required IconData icon,
+      required bool selected,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: GestureDetector(
+          onTap: onTap,
+          behavior: HitTestBehavior.opaque,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+            decoration: BoxDecoration(
+              color: selected ? const Color(0xFF15803D) : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 16,
+                  color: selected ? Colors.white : const Color(0xFF6B7280),
+                ),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    label,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: selected ? Colors.white : const Color(0xFF6B7280),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? Colors.white.withOpacity(0.25)
+                        : const Color(0xFFF3F4F6),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: selected ? Colors.white : const Color(0xFF6B7280),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3F4F6),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          segment(
+            label: 'My Habits',
+            count: myCount,
+            icon: Icons.check_circle_outline_rounded,
+            selected: !_showRecommended,
+            onTap: () => setState(() => _showRecommended = false),
+          ),
+          segment(
+            label: 'Recommended',
+            count: recCount,
+            icon: Icons.auto_awesome,
+            selected: _showRecommended,
+            onTap: () => setState(() => _showRecommended = true),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionEmpty(String message) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF9FAFB),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE5E7EB)),
+      ),
+      child: Text(
+        message,
+        textAlign: TextAlign.center,
+        style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280), height: 1.4),
       ),
     );
   }
