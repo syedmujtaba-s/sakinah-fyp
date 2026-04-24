@@ -18,15 +18,29 @@ class GuidanceService {
   /// [excludeStoryIds] — story IDs the user has already tried whose advice
   /// didn't help. The backend filters these out before retrieval so a
   /// different story surfaces (used by the "need alternative" feedback flow).
+  ///
+  /// [followupQuestion] + [previousStoryId] — when set, the backend skips
+  /// a fresh RAG lookup and continues the same story-grounded conversation.
+  /// [previousSeerahConnection] feeds the LLM the earlier narrative so the
+  /// follow-up answer goes deeper instead of repeating.
   static Future<Map<String, dynamic>> getGuidance({
     required String journalEntry,
     required String emotion,
     List<String> excludeStoryIds = const [],
+    String? followupQuestion,
+    String? previousStoryId,
+    String? previousSeerahConnection,
   }) async {
     final payload = {
       'journal_entry': journalEntry,
       'emotion': emotion.toLowerCase(),
       if (excludeStoryIds.isNotEmpty) 'exclude_story_ids': excludeStoryIds,
+      if (followupQuestion != null && followupQuestion.isNotEmpty)
+        'followup_question': followupQuestion,
+      if (previousStoryId != null && previousStoryId.isNotEmpty)
+        'previous_story_id': previousStoryId,
+      if (previousSeerahConnection != null && previousSeerahConnection.isNotEmpty)
+        'previous_seerah_connection': previousSeerahConnection,
     };
 
     try {

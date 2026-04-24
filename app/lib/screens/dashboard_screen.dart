@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'emotion_checkin_screen.dart';
+import 'journaling_screen.dart';
 import 'reminders_screen.dart';
 import 'journal_history_screen.dart';
+import 'saved_screen.dart';
 import 'habits/habit_tracker_screen.dart';
 import '../services/daily_wisdom_service.dart';
 
@@ -152,80 +154,107 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFFAFAFA),
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: Colors.white,
-        automaticallyImplyLeading: false,
-        titleSpacing: 16,
-        title: RichText(
-          maxLines: 2,
-          text: TextSpan(
-            children: [
-              const TextSpan(
-                text: "Assalamu Alaikum, ",
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Color(0xFF6B7280),
-                  fontWeight: FontWeight.w500,
+      // CustomScrollView lets the AppBar collapse smoothly as content passes
+      // under it — greeting reads as content when at the top, becomes a compact
+      // chrome bar when scrolled. Same pattern Apple Health / News / Instagram
+      // use so the header never feels disconnected from the content.
+      body: CustomScrollView(
+        slivers: [
+          SliverAppBar(
+            pinned: true,
+            elevation: 0,
+            scrolledUnderElevation: 1,
+            expandedHeight: 96,
+            backgroundColor: Colors.white,
+            surfaceTintColor: Colors.white,
+            automaticallyImplyLeading: false,
+            titleSpacing: 16,
+            flexibleSpace: FlexibleSpaceBar(
+              titlePadding: const EdgeInsetsDirectional.only(start: 16, bottom: 14, end: 140),
+              expandedTitleScale: 1.25,
+              title: RichText(
+                maxLines: 2,
+                text: TextSpan(
+                  children: [
+                    const TextSpan(
+                      text: "Assalamu Alaikum, ",
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Color(0xFF6B7280),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    TextSpan(
+                      text: displayName,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF064E3B),
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              TextSpan(
-                text: displayName,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF064E3B),
+            ),
+            actions: [
+              // Saved (bookmarked advice)
+              IconButton(
+                tooltip: 'Saved advice',
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const SavedScreen()),
+                  );
+                },
+                icon: const Icon(Icons.star_outline_rounded, color: Color(0xFF15803D)),
+              ),
+              // Bell icon for reminders
+              IconButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const RemindersScreen()),
+                  );
+                },
+                icon: const Icon(Icons.notifications_outlined, color: Color(0xFF15803D)),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 16.0),
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: const Color(0xFFDCFCE7),
+                  backgroundImage: (photoBase64 != null && photoBase64!.isNotEmpty)
+                      ? MemoryImage(base64Decode(photoBase64!))
+                      : (photoUrl != null && photoUrl!.isNotEmpty)
+                          ? NetworkImage(photoUrl!) as ImageProvider
+                          : null,
+                  child: (photoBase64 == null || photoBase64!.isEmpty) &&
+                          (photoUrl == null || photoUrl!.isEmpty)
+                      ? Text(
+                          displayName.isNotEmpty
+                              ? displayName[0].toUpperCase()
+                              : 'S',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF15803D),
+                            fontSize: 14,
+                          ),
+                        )
+                      : null,
                 ),
               ),
             ],
           ),
-        ),
-        actions: [
-          // Bell icon for reminders
-          IconButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const RemindersScreen()),
-              );
-            },
-            icon: const Icon(Icons.notifications_outlined, color: Color(0xFF15803D)),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0),
-            child: CircleAvatar(
-              radius: 20,
-              backgroundColor: const Color(0xFFDCFCE7),
-              backgroundImage: (photoBase64 != null && photoBase64!.isNotEmpty)
-                  ? MemoryImage(base64Decode(photoBase64!))
-                  : (photoUrl != null && photoUrl!.isNotEmpty)
-                      ? NetworkImage(photoUrl!) as ImageProvider
-                      : null,
-              child: (photoBase64 == null || photoBase64!.isEmpty) &&
-                      (photoUrl == null || photoUrl!.isEmpty)
-                  ? Text(
-                      displayName.isNotEmpty
-                          ? displayName[0].toUpperCase()
-                          : 'S',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF15803D),
-                        fontSize: 16,
-                      ),
-                    )
-                  : null,
-            ),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          SliverPadding(
+            padding: const EdgeInsets.all(20.0),
+            sliver: SliverList(
+              delegate: SliverChildListDelegate([
               // ─── 1. Main Check-in CTA Card ───
               _buildCheckinCard(),
+              const SizedBox(height: 20),
+
+              // ─── 1b. Quick-mood tiles — one-tap reflection ───
+              _buildQuickMoodRow(),
               const SizedBox(height: 24),
 
               // ─── 2. Daily Seerah Wisdom ───
@@ -260,9 +289,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const SizedBox(height: 12),
               _buildRecentJournalCard(),
               const SizedBox(height: 40),
-            ],
+              ]),
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -325,6 +355,81 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  // ─── Quick-mood tile row — tap a mood to jump straight into journaling pre-filled ───
+  Widget _buildQuickMoodRow() {
+    const quickMoods = [
+      {'mood': 'grateful', 'emoji': '🤲', 'label': 'Grateful'},
+      {'mood': 'sad', 'emoji': '😔', 'label': 'Sad'},
+      {'mood': 'anxious', 'emoji': '😰', 'label': 'Anxious'},
+      {'mood': 'angry', 'emoji': '😠', 'label': 'Angry'},
+      {'mood': 'lonely', 'emoji': '🥺', 'label': 'Lonely'},
+      {'mood': 'lost', 'emoji': '🧭', 'label': 'Lost'},
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(left: 4, bottom: 10),
+          child: Text(
+            'Quick reflection',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF6B7280),
+              letterSpacing: 0.3,
+            ),
+          ),
+        ),
+        SizedBox(
+          height: 86,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: quickMoods.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (context, i) {
+              final m = quickMoods[i];
+              return InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => JournalingScreen(mood: m['mood']!),
+                    ),
+                  );
+                },
+                child: Container(
+                  width: 74,
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFE5E7EB)),
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(m['emoji']!, style: const TextStyle(fontSize: 24)),
+                      const SizedBox(height: 6),
+                      Text(
+                        m['label']!,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Color(0xFF374151),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 
@@ -439,6 +544,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         const dayLetters = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
+        // Weekly insight: most-common mood across the logged days
+        String? topMood;
+        if (moodByDay.isNotEmpty) {
+          final counts = <String, int>{};
+          for (final m in moodByDay.values) {
+            if (m.isEmpty) continue;
+            counts[m] = (counts[m] ?? 0) + 1;
+          }
+          if (counts.isNotEmpty) {
+            topMood = counts.entries
+                .reduce((a, b) => a.value >= b.value ? a : b)
+                .key;
+          }
+        }
+
         return Container(
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
           decoration: BoxDecoration(
@@ -446,9 +566,48 @@ class _DashboardScreenState extends State<DashboardScreen> {
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: Colors.grey.shade200),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: List.generate(7, (i) {
+          child: Column(
+            children: [
+              if (topMood != null && moodByDay.length >= 2) ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12, left: 4),
+                  child: Row(
+                    children: [
+                      Text(
+                        _moodEmojis[topMood] ?? '🌱',
+                        style: const TextStyle(fontSize: 18),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: RichText(
+                          text: TextSpan(
+                            style: const TextStyle(
+                              fontSize: 13,
+                              color: Color(0xFF374151),
+                            ),
+                            children: [
+                              const TextSpan(text: 'This week, you mostly felt '),
+                              TextSpan(
+                                text: topMood,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF15803D),
+                                ),
+                              ),
+                              const TextSpan(text: '.'),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: Color(0xFFF3F4F6)),
+                const SizedBox(height: 12),
+              ],
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: List.generate(7, (i) {
               final date = now.subtract(Duration(days: 6 - i));
               final key = '${date.year}-${date.month}-${date.day}';
               final mood = moodByDay[key];
@@ -487,6 +646,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               );
             }),
+          ),
+            ],
           ),
         );
       },

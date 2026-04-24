@@ -20,6 +20,8 @@ class JournalHistoryScreen extends StatelessWidget {
         ),
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.white,
         iconTheme: const IconThemeData(color: Color(0xFF15803D)),
       ),
       body: StreamBuilder<QuerySnapshot>(
@@ -47,10 +49,14 @@ class JournalHistoryScreen extends StatelessWidget {
             itemCount: docs.length,
             itemBuilder: (context, index) {
               final data = docs[index].data() as Map<String, dynamic>;
+              final savedGuidance = (data['hasGuidance'] == true)
+                  ? (data['guidance'] as Map<String, dynamic>?)
+                  : null;
               return _JournalEntryCard(
                 text: data['text'] ?? '',
                 mood: data['mood'] ?? '',
                 createdAt: data['createdAt'] as Timestamp?,
+                savedGuidance: savedGuidance,
               );
             },
           );
@@ -103,11 +109,13 @@ class _JournalEntryCard extends StatefulWidget {
   final String text;
   final String mood;
   final Timestamp? createdAt;
+  final Map<String, dynamic>? savedGuidance;
 
   const _JournalEntryCard({
     required this.text,
     required this.mood,
     required this.createdAt,
+    this.savedGuidance,
   });
 
   @override
@@ -168,6 +176,20 @@ class _JournalEntryCardState extends State<_JournalEntryCard> {
       'lost': Color(0xFF374151),
     };
     return map[mood.toLowerCase()] ?? const Color(0xFF15803D);
+  }
+
+  void _openSavedGuidance() {
+    final saved = widget.savedGuidance;
+    if (saved == null) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GuidanceScreen(
+          mood: widget.mood,
+          guidanceData: Map<String, dynamic>.from(saved),
+        ),
+      ),
+    );
   }
 
   Future<void> _getGuidanceAgain() async {
@@ -268,9 +290,48 @@ class _JournalEntryCardState extends State<_JournalEntryCard> {
               ),
             ],
 
-            // Expanded: Get Guidance Again button
+            // Saved-guidance marker in collapsed view
+            if (!_isExpanded && widget.savedGuidance != null) ...[
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Icon(Icons.auto_awesome, size: 14, color: Color(0xFF15803D)),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Guidance saved · ${widget.savedGuidance!['story_title'] ?? ''}',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF15803D),
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+
+            // Expanded: View Guidance (primary if saved) + Get Guidance Again (secondary)
             if (_isExpanded) ...[
               const SizedBox(height: 16),
+              if (widget.savedGuidance != null) ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _openSavedGuidance,
+                    icon: const Icon(Icons.menu_book_rounded, size: 16),
+                    label: const Text('View Guidance'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF15803D),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+              ],
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -281,7 +342,11 @@ class _JournalEntryCardState extends State<_JournalEntryCard> {
                           child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF15803D)),
                         )
                       : const Icon(Icons.auto_awesome, size: 16),
-                  label: Text(_isLoadingGuidance ? 'Finding Guidance...' : 'Get Guidance Again'),
+                  label: Text(
+                    _isLoadingGuidance
+                        ? 'Finding Guidance...'
+                        : (widget.savedGuidance != null ? 'Get New Guidance' : 'Get Guidance Again'),
+                  ),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFF15803D),
                     side: const BorderSide(color: Color(0xFF15803D)),

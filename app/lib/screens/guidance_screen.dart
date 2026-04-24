@@ -1,6 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import '../services/guidance_service.dart';
+import 'story_detail_screen.dart';
 
 class GuidanceScreen extends StatefulWidget {
   final String mood;
@@ -19,11 +22,145 @@ class GuidanceScreen extends StatefulWidget {
 class _GuidanceScreenState extends State<GuidanceScreen> {
   final Set<String> _trackedAdvice = {};
   final Set<String> _tracking = {};
+  final Set<String> _bookmarkedAdvice = {};
+  final Set<String> _bookmarking = {};
+  bool _askingFollowup = false;
 
   String _slug(String s) => s
       .toLowerCase()
       .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
       .replaceAll(RegExp(r'^_+|_+$'), '');
+
+  String _bookmarkDocId(String advice) {
+    final storyId = widget.guidanceData['story_id']?.toString() ?? '';
+    final adviceSlug = _slug(advice);
+    final shortSlug = adviceSlug.length > 40 ? adviceSlug.substring(0, 40) : adviceSlug;
+    return 'bm_${_slug(storyId)}_$shortSlug';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Seed which bullets are already bookmarked so the star renders correctly
+    // when the user re-opens a saved guidance session.
+    _loadBookmarkStates();
+  }
+
+  Future<void> _loadBookmarkStates() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    final practicalAdvice = List<String>.from(widget.guidanceData['practical_advice'] ?? []);
+    if (practicalAdvice.isEmpty) return;
+    try {
+      final bookmarksRef = FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('bookmarks');
+      for (final advice in practicalAdvice) {
+        final doc = await bookmarksRef.doc(_bookmarkDocId(advice)).get();
+        if (doc.exists && mounted) {
+          setState(() => _bookmarkedAdvice.add(advice));
+        }
+      }
+    } catch (_) {
+      // Best-effort; if seed fails the star will still work from fresh taps.
+    }
+  }
+
+  Future<void> _askFollowUp(String question) async {
+    if (_askingFollowup) return;
+    setState(() => _askingFollowup = true);
+
+    final gd = widget.guidanceData;
+    try {
+      final next = await GuidanceService.getGuidance(
+        journalEntry: '',
+        emotion: widget.mood,
+        followupQuestion: question,
+        previousStoryId: gd['story_id']?.toString(),
+        previousSeerahConnection: gd['seerah_connection']?.toString(),
+      );
+      if (!mounted) return;
+      // Push a fresh GuidanceScreen with the follow-up response so the user
+      // can stack multiple follow-ups and walk back through them.
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => GuidanceScreen(
+            mood: widget.mood,
+            guidanceData: next,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Follow-up failed: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _askingFollowup = false);
+    }
+  }
+
+  Future<void> _toggleBookmark(String advice) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sign in to bookmark advice.')),
+      );
+      return;
+    }
+    if (_bookmarking.contains(advice)) return;
+
+    setState(() => _bookmarking.add(advice));
+
+    final docRef = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('bookmarks')
+        .doc(_bookmarkDocId(advice));
+
+    final isBookmarked = _bookmarkedAdvice.contains(advice);
+
+    try {
+      if (isBookmarked) {
+        await docRef.delete();
+        if (!mounted) return;
+        setState(() {
+          _bookmarkedAdvice.remove(advice);
+          _bookmarking.remove(advice);
+        });
+      } else {
+        final gd = widget.guidanceData;
+        await docRef.set({
+          'advice': advice,
+          'storyId': gd['story_id']?.toString() ?? '',
+          'storyTitle': gd['story_title']?.toString() ?? '',
+          'storyPeriod': gd['story_period']?.toString() ?? '',
+          'emotion': widget.mood,
+          'createdAt': FieldValue.serverTimestamp(),
+        });
+        if (!mounted) return;
+        setState(() {
+          _bookmarkedAdvice.add(advice);
+          _bookmarking.remove(advice);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Saved to your bookmarks.'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _bookmarking.remove(advice));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update bookmark: $e')),
+      );
+    }
+  }
 
   Future<void> _trackAdvice(String advice) async {
     final user = FirebaseAuth.instance.currentUser;
@@ -101,6 +238,9 @@ class _GuidanceScreenState extends State<GuidanceScreen> {
     final lessons = List<String>.from(guidanceData['lessons'] ?? []);
     final practicalAdvice = List<String>.from(guidanceData['practical_advice'] ?? []);
     final dua = guidanceData['dua'] ?? '';
+    final followUps = List<String>.from(guidanceData['follow_up_questions'] ?? []);
+    final isCrisis = guidanceData['crisis'] == true;
+    final crisisMessage = guidanceData['crisis_message']?.toString() ?? '';
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -135,6 +275,12 @@ class _GuidanceScreenState extends State<GuidanceScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Crisis banner — shown at the top so help routes are the first thing visible
+                  if (isCrisis) ...[
+                    _buildCrisisBanner(context, crisisMessage),
+                    const SizedBox(height: 24),
+                  ],
+
                   // Mood + Period Tags
                   Wrap(
                     spacing: 8,
@@ -164,7 +310,43 @@ class _GuidanceScreenState extends State<GuidanceScreen> {
                       height: 1.6,
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 12),
+
+                  // Read the full story — opens the original narrative that grounded this response
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => StoryDetailScreen(
+                              title: title,
+                              period: period,
+                              summary: (guidanceData['story_summary'] ?? '').toString(),
+                              fullStory: (guidanceData['story'] ?? '').toString(),
+                              lessons: lessons,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.menu_book_rounded, size: 18, color: Color(0xFF15803D)),
+                      label: const Text(
+                        'Read the full Seerah story',
+                        style: TextStyle(
+                          color: Color(0xFF15803D),
+                          fontWeight: FontWeight.w600,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        alignment: Alignment.centerLeft,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
 
                   // Lessons
                   if (lessons.isNotEmpty) ...[
@@ -225,6 +407,73 @@ class _GuidanceScreenState extends State<GuidanceScreen> {
                       ),
                     ),
 
+                  // Follow-up question chips — continue the same story-grounded conversation
+                  if (followUps.isNotEmpty) ...[
+                    const SizedBox(height: 32),
+                    Row(
+                      children: const [
+                        Icon(Icons.forum_outlined, size: 18, color: Color(0xFF15803D)),
+                        SizedBox(width: 8),
+                        Text(
+                          'Ask a follow-up',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF15803D),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: followUps
+                          .map((q) => ActionChip(
+                                label: Text(
+                                  q,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xFF15803D),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                avatar: const Icon(
+                                  Icons.arrow_forward_rounded,
+                                  size: 14,
+                                  color: Color(0xFF15803D),
+                                ),
+                                backgroundColor: const Color(0xFFDCFCE7),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(20),
+                                  side: const BorderSide(color: Color(0xFF15803D)),
+                                ),
+                                onPressed: _askingFollowup ? null : () => _askFollowUp(q),
+                              ))
+                          .toList(),
+                    ),
+                    if (_askingFollowup) ...[
+                      const SizedBox(height: 10),
+                      const Row(
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF15803D),
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            'Thinking through the story...',
+                            style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+
                   const SizedBox(height: 40),
                   Center(
                     child: TextButton(
@@ -238,6 +487,101 @@ class _GuidanceScreenState extends State<GuidanceScreen> {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCrisisBanner(BuildContext context, String message) {
+    // Extract phone numbers from the crisis message so we can render them
+    // as tap-to-copy chips instead of plain text buried in a paragraph.
+    final phoneRegex = RegExp(r'[+\d][\d\s\-]{5,}\d');
+    final numbers = phoneRegex
+        .allMatches(message)
+        .map((m) => m.group(0)!.trim())
+        .toSet()
+        .toList();
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEE2E2),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFCA5A5), width: 1.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: const [
+              Icon(Icons.favorite_rounded, color: Color(0xFFDC2626), size: 22),
+              SizedBox(width: 10),
+              Text(
+                'You are not alone',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF991B1B),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'What you\'re feeling is heavy — please reach out right now. These lines are open 24/7.',
+            style: TextStyle(fontSize: 14, color: Color(0xFF7F1D1D), height: 1.5),
+          ),
+          if (numbers.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: numbers
+                  .map((n) => InkWell(
+                        onTap: () {
+                          Clipboard.setData(ClipboardData(text: n));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Copied $n — paste into your dialer.'),
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(seconds: 3),
+                            ),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFDC2626),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.phone, color: Colors.white, size: 14),
+                              const SizedBox(width: 6),
+                              Text(
+                                n,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              const Icon(Icons.copy_rounded, color: Colors.white, size: 13),
+                            ],
+                          ),
+                        ),
+                      ))
+                  .toList(),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Tap a number to copy it.',
+              style: TextStyle(fontSize: 11, color: Color(0xFF7F1D1D)),
+            ),
+          ],
         ],
       ),
     );
@@ -289,6 +633,8 @@ class _GuidanceScreenState extends State<GuidanceScreen> {
           ...items.map((item) {
             final tracked = _trackedAdvice.contains(item);
             final loading = _tracking.contains(item);
+            final bookmarked = _bookmarkedAdvice.contains(item);
+            final bookmarkBusy = _bookmarking.contains(item);
             return Padding(
               padding: const EdgeInsets.only(bottom: 10),
               child: Row(
@@ -305,7 +651,22 @@ class _GuidanceScreenState extends State<GuidanceScreen> {
                       style: const TextStyle(color: Color(0xFF374151), height: 1.4),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  // Bookmark star — toggles users/{uid}/bookmarks/{id}
+                  InkWell(
+                    onTap: bookmarkBusy ? null : () => _toggleBookmark(item),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        bookmarked ? Icons.star_rounded : Icons.star_outline_rounded,
+                        size: 22,
+                        color: bookmarked
+                            ? const Color(0xFFF59E0B)
+                            : const Color(0xFF9CA3AF),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
                   SizedBox(
                     height: 32,
                     child: tracked

@@ -32,11 +32,14 @@ class _JournalingScreenState extends State<JournalingScreen> {
 
     final journalText = _journalController.text.trim();
 
-    // Save to Firestore
+    // Create the journal doc up front so it's captured even if guidance fails.
+    // We keep the ref around and merge the guidance response into the same doc
+    // once it's available, so history can re-open the full session.
     final user = FirebaseAuth.instance.currentUser;
+    DocumentReference<Map<String, dynamic>>? journalRef;
     if (user != null) {
       try {
-        await FirebaseFirestore.instance
+        journalRef = await FirebaseFirestore.instance
             .collection('users')
             .doc(user.uid)
             .collection('journals')
@@ -44,9 +47,10 @@ class _JournalingScreenState extends State<JournalingScreen> {
           'text': journalText,
           'mood': widget.mood,
           'createdAt': FieldValue.serverTimestamp(),
+          'hasGuidance': false,
         });
       } catch (e) {
-        // Handle error silently
+        // Handle error silently — guidance call can still proceed.
       }
     }
 
@@ -61,6 +65,34 @@ class _JournalingScreenState extends State<JournalingScreen> {
       );
 
       _hasFetchedGuidanceThisSession = true;
+
+      // Persist the full guidance response so it's revisitable from history.
+      if (journalRef != null) {
+        try {
+          await journalRef.update({
+            'hasGuidance': true,
+            'guidance': {
+              'story_id': guidanceData['story_id'] ?? '',
+              'story_title': guidanceData['story_title'] ?? '',
+              'story_period': guidanceData['story_period'] ?? '',
+              'story_summary': guidanceData['story_summary'] ?? '',
+              'story': guidanceData['story'] ?? '',
+              'seerah_connection': guidanceData['seerah_connection'] ?? '',
+              'lessons': guidanceData['lessons'] ?? [],
+              'practical_advice': guidanceData['practical_advice'] ?? [],
+              'dua': guidanceData['dua'] ?? '',
+              'follow_up_questions': guidanceData['follow_up_questions'] ?? [],
+              'emotion': guidanceData['emotion'] ?? widget.mood,
+              'ai_fallback': guidanceData['ai_fallback'] ?? false,
+              'crisis': guidanceData['crisis'] ?? false,
+              'crisis_message': guidanceData['crisis_message'] ?? '',
+            },
+          });
+        } catch (_) {
+          // Saving history is best-effort; don't block the user from seeing guidance.
+        }
+      }
+
       if (!mounted) return;
 
       Navigator.pushReplacement(
@@ -95,6 +127,8 @@ class _JournalingScreenState extends State<JournalingScreen> {
       appBar: AppBar(
         backgroundColor: Colors.white,
         elevation: 0,
+        scrolledUnderElevation: 1,
+        surfaceTintColor: Colors.white,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.black87),
           onPressed: () => Navigator.pop(context),
@@ -145,6 +179,37 @@ class _JournalingScreenState extends State<JournalingScreen> {
                   ],
                 ),
               ),
+
+              // Alternatives banner — shown when the user arrived here from the
+              // "Need alternative" feedback flow so they know this is a retry.
+              if (widget.excludeStoryIds.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF3C7),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFFDE68A)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: const [
+                      Icon(Icons.refresh_rounded, size: 20, color: Color(0xFF92400E)),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          "We'll skip the story from last time and find something different. Write what's on your mind — even a sentence is fine.",
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Color(0xFF78350F),
+                            height: 1.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 24),
 
               const Text(
