@@ -67,13 +67,19 @@ OUTPUT JSON FORMAT:
     "seerah_connection": "A 2-3 paragraph personalized narrative connecting the user's emotion and journal entry to the Seerah story. Start by acknowledging their feeling, then tell the relevant part of the story, then draw the parallel.",
     "lessons": ["Lesson 1 drawn from the story", "Lesson 2", "Lesson 3"],
     "practical_advice": ["Specific actionable advice 1", "Advice 2", "Advice 3"],
-    "dua": "A short relevant dua in English transliteration with meaning"
+    "dua": "A short relevant dua in English transliteration with meaning",
+    "follow_up_questions": [
+        "A short question the user might naturally ask next about this story or situation — <= 10 words",
+        "A second follow-up question on a different angle",
+        "A third follow-up question"
+    ]
 }
 
 IMPORTANT:
 - If the journal entry contains harmful or self-harm content, respond with empathy and gently encourage seeking professional help, while still providing comfort from the Seerah.
 - Never dismiss or minimize the user's emotions.
 - The tone should feel like a wise, caring older sibling who knows the Seerah deeply.
+- follow_up_questions should open a thoughtful next conversation (e.g., "How did the Prophet ﷺ respond after this?" or "What can I read next?"). Each <= 10 words.
 - Respond ONLY with valid JSON. No extra text before or after the JSON."""
 
 
@@ -97,39 +103,80 @@ async def get_guidance(request: GuidanceRequest):
     # Crisis check — before any RAG/LLM work
     is_crisis = _detect_crisis(request.journal_entry)
 
-    # RAG retrieval — honoring any stories the user has already tried and flagged as unhelpful
-    stories = search_stories(
-        request.journal_entry,
-        emotion,
-        exclude_story_ids=request.exclude_story_ids,
+    # Follow-up mode: the user is asking a question about a previous guidance
+    # session. Skip RAG (we re-use the previous story) and change the prompt.
+    is_followup = (
+        request.followup_question is not None
+        and request.followup_question.strip() != ""
+        and request.previous_story_id is not None
     )
-    if not stories:
-        raise HTTPException(
-            status_code=404,
-            detail="No relevant stories found. Please try rephrasing your journal entry."
+
+    if is_followup:
+        # Fetch the specific story the user was previously shown
+        from bson import ObjectId
+        from database import stories_collection as _stories
+        try:
+            story_doc = _stories.find_one({"_id": ObjectId(request.previous_story_id)})
+        except Exception:
+            story_doc = None
+        if not story_doc:
+            raise HTTPException(status_code=404, detail="Previous story not found for follow-up.")
+        story_doc["_id"] = str(story_doc["_id"])
+        stories = [story_doc]
+    else:
+        # RAG retrieval — honoring any stories the user has already tried and flagged as unhelpful
+        stories = search_stories(
+            request.journal_entry,
+            emotion,
+            exclude_story_ids=request.exclude_story_ids,
         )
+        if not stories:
+            raise HTTPException(
+                status_code=404,
+                detail="No relevant stories found. Please try rephrasing your journal entry."
+            )
 
     best_story = stories[0]
 
-    # Build LLM context from top 2 stories
-    stories_context = ""
-    for i, story in enumerate(stories[:2]):
-        stories_context += (
-            f"\n--- Story {i+1}: {story.get('title', '')} ---\n"
-            f"Period: {story.get('period', '')}\n"
-            f"Summary: {story.get('summary', '')}\n"
-            f"Full Story: {story.get('story', '')}\n"
-            f"Lessons: {', '.join(story.get('lessons', []))}\n"
-            f"Practical Advice: {', '.join(story.get('practical_advice', []))}\n"
+    # Build LLM context
+    if is_followup:
+        stories_context = (
+            f"\n--- Story: {best_story.get('title', '')} ---\n"
+            f"Period: {best_story.get('period', '')}\n"
+            f"Summary: {best_story.get('summary', '')}\n"
+            f"Full Story: {best_story.get('story', '')}\n"
+            f"Lessons: {', '.join(best_story.get('lessons', []))}\n"
+            f"Practical Advice: {', '.join(best_story.get('practical_advice', []))}\n"
         )
+        user_prompt = (
+            f"The user previously reflected (Emotion: {emotion}) and received guidance grounded in this Seerah story.\n"
+            f"Previous guidance seerah_connection:\n\"\"\"\n{request.previous_seerah_connection or ''}\n\"\"\"\n\n"
+            f"Seerah story context:\n{stories_context}\n\n"
+            f"Now the user is asking a follow-up question: \"{request.followup_question}\"\n\n"
+            f"Answer the follow-up by staying grounded in this same story and the previous guidance. "
+            f"Do NOT repeat the earlier seerah_connection verbatim — go deeper, draw out the specific detail the user asked about.\n"
+            f"Response (JSON in the same schema as before — follow_up_questions should propose further deeper questions):"
+        )
+    else:
+        # Build LLM context from top 2 stories
+        stories_context = ""
+        for i, story in enumerate(stories[:2]):
+            stories_context += (
+                f"\n--- Story {i+1}: {story.get('title', '')} ---\n"
+                f"Period: {story.get('period', '')}\n"
+                f"Summary: {story.get('summary', '')}\n"
+                f"Full Story: {story.get('story', '')}\n"
+                f"Lessons: {', '.join(story.get('lessons', []))}\n"
+                f"Practical Advice: {', '.join(story.get('practical_advice', []))}\n"
+            )
 
-    user_prompt = (
-        f"User's Emotion: {emotion}\n"
-        f"User's Journal Entry: \"{request.journal_entry}\"\n\n"
-        f"Retrieved Seerah Stories:\n{stories_context}\n\n"
-        f"Based on the above, generate personalized emotional guidance connecting the user's situation to the Seerah story.\n"
-        f"Response (JSON):"
-    )
+        user_prompt = (
+            f"User's Emotion: {emotion}\n"
+            f"User's Journal Entry: \"{request.journal_entry}\"\n\n"
+            f"Retrieved Seerah Stories:\n{stories_context}\n\n"
+            f"Based on the above, generate personalized emotional guidance connecting the user's situation to the Seerah story.\n"
+            f"Response (JSON):"
+        )
 
     # Call Groq asynchronously
     ai_fallback = False
@@ -168,18 +215,28 @@ async def get_guidance(request: GuidanceRequest):
     else:
         ai_fallback = True
 
+    # Fallback follow-up suggestions if the LLM doesn't provide any
+    _default_followups = [
+        "How did the Prophet ﷺ respond next?",
+        "What did the companions learn from this?",
+        "What dua did he ﷺ make in this moment?",
+    ]
+
     if ai_result:
         result = {
             "story_id": best_story.get("_id", ""),
             "story_title": best_story.get("title", ""),
             "story_period": best_story.get("period", ""),
             "story_summary": best_story.get("summary", ""),
+            "story": best_story.get("story", ""),
             "seerah_connection": ai_result.get("seerah_connection", ""),
             "lessons": ai_result.get("lessons", best_story.get("lessons", [])),
             "practical_advice": ai_result.get("practical_advice", best_story.get("practical_advice", [])),
             "dua": ai_result.get("dua", "May Allah ease your heart and grant you peace."),
+            "follow_up_questions": ai_result.get("follow_up_questions", _default_followups),
             "emotion": emotion,
-            "ai_fallback": False
+            "ai_fallback": False,
+            "is_followup": is_followup,
         }
     else:
         result = {
@@ -187,12 +244,15 @@ async def get_guidance(request: GuidanceRequest):
             "story_title": best_story.get("title", ""),
             "story_period": best_story.get("period", ""),
             "story_summary": best_story.get("summary", ""),
+            "story": best_story.get("story", ""),
             "seerah_connection": best_story.get("story", ""),
             "lessons": best_story.get("lessons", []),
             "practical_advice": best_story.get("practical_advice", []),
             "dua": "May Allah ease your heart and grant you peace. (Allahumma yassir wa la tu'assir)",
+            "follow_up_questions": _default_followups,
             "emotion": emotion,
-            "ai_fallback": True
+            "ai_fallback": True,
+            "is_followup": is_followup,
         }
 
     # Attach crisis info if detected
