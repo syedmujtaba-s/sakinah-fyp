@@ -29,6 +29,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? photoUrl;    // Legacy/Google sign-in URL fallback
   Uint8List? _imageBytes; // Decoded bytes for display
 
+  // Camera-based emotion detection opt-in. Persisted on the user's
+  // Firestore doc so the preference travels with the account, not the
+  // device. Defaults to true so new users get the full experience.
+  bool _cameraEmotionEnabled = true;
+  bool _cameraToggleSaving = false;
+
   // Sakinah Colors
   final Color primaryColor = const Color(0xFF15803D);
 
@@ -82,6 +88,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _emailController.text = data['email'] ?? user.email ?? '';
           photoBase64 = data['photoBase64'] as String? ?? '';
           photoUrl = data['photoUrl'] as String? ?? '';
+          // Default to true if the field has never been set.
+          _cameraEmotionEnabled = data['cameraEmotionEnabled'] as bool? ?? true;
           isLoading = false;
         });
       } else {
@@ -299,6 +307,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } finally {
       setState(() => isSaving = false);
+    }
+  }
+
+  /// Persist the camera opt-in toggle to the user's Firestore doc.
+  /// Optimistically flips the local state so the UI feels instant; rolls
+  /// back on failure with a snack.
+  Future<void> _setCameraEmotionEnabled(bool value) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    setState(() {
+      _cameraEmotionEnabled = value;
+      _cameraToggleSaving = true;
+    });
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .set({
+            'cameraEmotionEnabled': value,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+    } catch (e) {
+      // Roll back the local change.
+      if (mounted) {
+        setState(() => _cameraEmotionEnabled = !value);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Couldn\'t save preference: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _cameraToggleSaving = false);
     }
   }
 
@@ -603,6 +647,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       );
                     },
+                  ),
+
+                  // ─── Camera-based emotion detection toggle ───
+                  // Lives in Account Settings so users who want a fully
+                  // text-only experience can opt out. The check-in screen
+                  // reads this on entry and skips the camera path when off.
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    secondary: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF3F4F6),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        Icons.camera_alt_outlined,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                    title: const Text(
+                      'Camera-based emotion detection',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: const Text(
+                      'Auto-read your expression from the camera. '
+                      'Images are never stored.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    value: _cameraEmotionEnabled,
+                    activeThumbColor: primaryColor,
+                    onChanged: _cameraToggleSaving
+                        ? null
+                        : (v) => _setCameraEmotionEnabled(v),
                   ),
 
                   const SizedBox(height: 20),

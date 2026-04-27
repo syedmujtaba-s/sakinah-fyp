@@ -27,6 +27,7 @@ SUPPORTED_EMOTIONS = [
 ]
 
 # --- Crisis keywords — checked before RAG/Groq ---
+# Hard signals: any one of these flips the crisis flag regardless of mood.
 CRISIS_KEYWORDS = [
     "kill myself", "end my life", "ending my life", "end it all", "take my life",
     "want to die", "suicide", "suicidal",
@@ -35,6 +36,22 @@ CRISIS_KEYWORDS = [
     "better off dead", "give up on life",
     "can't go on", "cannot go on", "don't want to live", "do not want to live"
 ]
+
+# Soft signals: phrases people use when they're in distress but stop short of
+# explicit suicide language. We ONLY treat these as crisis when the multi-modal
+# pipeline has already classified the user's mood as hopeless/lost/lonely —
+# i.e. face + text fusion is showing low valence. This is the "face-augmented
+# crisis detection" the plan called for, without needing the raw valence
+# scalar on the wire (the emotion label is already a downstream signal of it).
+SOFT_DISTRESS_KEYWORDS = [
+    "can't take", "cant take", "can't handle", "cant handle",
+    "exhausted with life", "broken inside", "feel empty", "feeling empty",
+    "no hope", "no point", "tired of everything", "give up",
+    "what's the point", "whats the point",
+    "alone forever", "everything is dark", "everything feels dark",
+    "i'm done", "im done", "completely lost",
+]
+SOFT_TRIGGER_EMOTIONS = {"hopeless", "lost", "lonely", "sad"}
 
 CRISIS_RESPONSE = {
     "crisis": True,
@@ -83,9 +100,24 @@ IMPORTANT:
 - Respond ONLY with valid JSON. No extra text before or after the JSON."""
 
 
-def _detect_crisis(text: str) -> bool:
+def _detect_crisis(text: str, emotion: str = "") -> bool:
+    """
+    Two-tier crisis detection.
+
+    Tier 1 — hard keywords: explicit suicide/self-harm language always wins.
+    Tier 2 — soft keywords + face-aware mood gate: phrases like "no point" or
+    "i can't take this" only count when the user's *detected emotion* is
+    already hopeless/lost/lonely/sad. This catches people whose face + journal
+    fusion is screaming distress even when their wording is muted.
+    """
     lower = text.lower()
-    return any(kw in lower for kw in CRISIS_KEYWORDS)
+    if any(kw in lower for kw in CRISIS_KEYWORDS):
+        return True
+    if emotion in SOFT_TRIGGER_EMOTIONS and any(
+        kw in lower for kw in SOFT_DISTRESS_KEYWORDS
+    ):
+        return True
+    return False
 
 
 # ============================
@@ -100,8 +132,10 @@ async def get_guidance(request: GuidanceRequest):
             detail=f"Unsupported emotion: '{emotion}'. Supported: {SUPPORTED_EMOTIONS}"
         )
 
-    # Crisis check — before any RAG/LLM work
-    is_crisis = _detect_crisis(request.journal_entry)
+    # Crisis check — before any RAG/LLM work. Pass the detected emotion so
+    # the soft-signal tier can fire on muted-language distress when the
+    # multi-modal pipeline already shows a hopeless/lost mood.
+    is_crisis = _detect_crisis(request.journal_entry, emotion)
 
     # Follow-up mode: the user is asking a question about a previous guidance
     # session. Skip RAG (we re-use the previous story) and change the prompt.

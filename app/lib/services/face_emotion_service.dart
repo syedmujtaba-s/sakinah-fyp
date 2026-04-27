@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:image/image.dart' as img;
 import '../config/api_config.dart';
 
 /// Multi-modal emotion detection client.
@@ -34,9 +35,15 @@ class FaceEmotionService {
 
     final form = FormData();
     if (imageBytes != null && imageBytes.isNotEmpty) {
+      // Compress before upload — typical phone JPEG is 90-200KB; we shrink to
+      // ~30-50KB. Saves bandwidth, keeps enough pixels for the backend's
+      // Haar cascade to find the face. The HSEmotion model itself takes
+      // 224x224 input so we resize to 480px on the long side as a balanced
+      // middle ground (plenty for detection, much smaller than the original).
+      final compressed = await compute(_compressForUpload, imageBytes);
       form.files.add(MapEntry(
         'image',
-        MultipartFile.fromBytes(imageBytes, filename: 'face.jpg'),
+        MultipartFile.fromBytes(compressed, filename: 'face.jpg'),
       ));
     }
     if (journalText != null && journalText.trim().isNotEmpty) {
@@ -77,6 +84,37 @@ class FaceEmotionService {
       return false;
     }
   }
+}
+
+/// Top-level so it can run on a background isolate via `compute()`.
+///
+/// Decodes the original JPEG, downscales the longer edge to 480px, and
+/// re-encodes at JPEG quality 85. 480px is a deliberate balance: small
+/// enough to halve the upload (90KB → ~30-40KB on a typical phone) yet
+/// large enough that the backend's Haar cascade still finds faces
+/// reliably. (HSEmotion itself takes 224×224, so any extra resolution
+/// past detection is discarded server-side.)
+Uint8List _compressForUpload(Uint8List original) {
+  final decoded = img.decodeImage(original);
+  if (decoded == null) {
+    // Decode failed — let the original bytes go through. The backend
+    // will return a clean error rather than a corrupted upload.
+    return original;
+  }
+
+  const targetLong = 480;
+  img.Image resized = decoded;
+  final longEdge = decoded.width >= decoded.height ? decoded.width : decoded.height;
+  if (longEdge > targetLong) {
+    resized = img.copyResize(
+      decoded,
+      width: decoded.width >= decoded.height ? targetLong : null,
+      height: decoded.height > decoded.width ? targetLong : null,
+      interpolation: img.Interpolation.linear,
+    );
+  }
+
+  return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
 }
 
 /// Strongly-typed response for the /api/emotion/detect endpoint.

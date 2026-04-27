@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../services/face_emotion_service.dart';
+import '../services/user_preferences_service.dart';
 import '../widgets/emotion_camera_view.dart';
 import 'journaling_screen.dart';
 
@@ -35,7 +36,23 @@ class _EmotionCheckinScreenState extends State<EmotionCheckinScreen> {
   @override
   void initState() {
     super.initState();
-    _requestCameraPermission();
+    _bootstrap();
+  }
+
+  /// Resolve the user's preference first, then either request camera
+  /// permission or jump straight to the manual grid. Honoring the toggle
+  /// up front means a privacy-conscious user never even sees a permission
+  /// dialog.
+  Future<void> _bootstrap() async {
+    final cameraEnabled = await UserPreferencesService.cameraEmotionEnabled();
+    if (!mounted) return;
+
+    if (!cameraEnabled) {
+      setState(() => _stage = _Stage.manual);
+      return;
+    }
+
+    await _requestCameraPermission();
   }
 
   Future<void> _requestCameraPermission() async {
