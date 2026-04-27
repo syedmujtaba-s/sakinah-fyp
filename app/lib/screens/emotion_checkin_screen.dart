@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../services/emotion_correction_logger.dart';
 import '../services/face_emotion_service.dart';
 import '../services/user_preferences_service.dart';
 import '../widgets/emotion_camera_view.dart';
@@ -32,6 +33,10 @@ class _EmotionCheckinScreenState extends State<EmotionCheckinScreen> {
   _Stage _stage = _Stage.askingPermission;
   String? _errorMessage;
   String? _detectedMood; // capitalized, e.g. "Anxious"
+  // Held so we can log "AI said X but user picked Y" overrides into
+  // Firestore as passive training data. Cleared after Confirm so users
+  // who agree with the AI don't generate noise rows.
+  EmotionDetectionResult? _lastAiSuggestion;
 
   @override
   void initState() {
@@ -89,6 +94,10 @@ class _EmotionCheckinScreenState extends State<EmotionCheckinScreen> {
         return;
       }
 
+      // Hold the suggestion so we can log it as training data if the user
+      // ends up overriding the AI's pick (either via "No, I'm not" or by
+      // picking a different chip in the manual grid).
+      _lastAiSuggestion = result;
       _detectedMood = result.displayEmotion;
       _showConfirmationSheet(result);
     } catch (e, stack) {
@@ -174,6 +183,11 @@ class _EmotionCheckinScreenState extends State<EmotionCheckinScreen> {
                   child: ElevatedButton(
                     onPressed: () {
                       Navigator.pop(context);
+                      // User accepted the AI's suggestion — clear the held
+                      // result so a later manual pick on the same screen
+                      // (after they cancel back to manual) doesn't get
+                      // misattributed as an "override".
+                      _lastAiSuggestion = null;
                       _navigateToJournal();
                     },
                     style: ElevatedButton.styleFrom(
@@ -430,6 +444,14 @@ class _EmotionCheckinScreenState extends State<EmotionCheckinScreen> {
   Widget _buildMoodChip(String label, String emoji) {
     return GestureDetector(
       onTap: () {
+        // Log the manual pick as training data. If the AI had previously
+        // suggested a different label this becomes an "override" row;
+        // otherwise it's a "no AI suggestion" baseline row. Both useful.
+        EmotionCorrectionLogger.logOverride(
+          aiSuggestion: _lastAiSuggestion,
+          chosenLabel: label,
+        );
+        _lastAiSuggestion = null;
         setState(() => _detectedMood = label);
         _navigateToJournal();
       },
