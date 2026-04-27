@@ -1,6 +1,24 @@
 from pydantic import BaseModel, Field
 
 
+# --- Emotion Detection Response ---
+class EmotionDetectionResponse(BaseModel):
+    predicted_emotion: str                    # one of Sakinah's 15
+    confidence: float
+    scores: dict[str, float]                  # full 15-way distribution
+    sources_used: list[str]                   # ["face"], ["text"], or both
+    fusion_strategy: str                      # "weighted_avg" | "single" | "higher_confidence:face" | ...
+    low_confidence: bool                      # UI flag — show manual picker
+    # Per-modality breakdown (nullable when that modality wasn't used).
+    face_predicted: str | None = None
+    face_confidence: float = 0.0
+    valence: float | None = None
+    arousal: float | None = None
+    text_predicted: str | None = None
+    text_confidence: float = 0.0
+    text_translated: bool = False
+
+
 # --- Guidance Request Model ---
 class GuidanceRequest(BaseModel):
     journal_entry: str

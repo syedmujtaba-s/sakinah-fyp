@@ -10,3 +10,13 @@ httpx
 openpyxl
 pytest
 pytest-asyncio
+
+# ── Multi-modal emotion detection ────────────────────
+# Face emotion: HSEmotion (AffectNet-trained, ONNX runtime, ~30MB)
+hsemotion-onnx
+onnxruntime
+# Text emotion: HuggingFace transformers + torch
+transformers
+torch
+# Image handling
+Pillow

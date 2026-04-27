@@ -21,8 +21,12 @@ class PrivacyScreen extends StatelessWidget {
       'text': "We use industry-standard security measures and rely on Google Firebase to protect your information."
     },
     {
-      'heading': "4. Your Choices",
-      'text': "You can view and update your profile information in the app or delete your account by contacting support."
+      'heading': "4. Camera-Based Emotion Detection",
+      'text': "When you use the camera check-in, your photo is sent securely to our analysis server, processed in real time, and immediately discarded. Your face image is never written to disk, never stored in any database, and never shared with third parties. Only the resulting emotion label (for example, \"Happy\" or \"Anxious\") is saved alongside your journal entry. You can disable the camera feature at any time and use manual emotion selection instead."
+    },
+    {
+      'heading': "5. Your Choices",
+      'text': "You can view and update your profile information in the app or delete your account by contacting support. You can revoke camera permission at any time from your device's app settings."
     },
   ];
 

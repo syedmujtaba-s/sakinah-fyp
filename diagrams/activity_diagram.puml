@@ -1,0 +1,97 @@
+@startuml Sakinah Activity Diagram
+
+title Sakinah — User Activity Workflow
+
+skinparam ActivityBackgroundColor #E3F2FD
+skinparam ActivityBorderColor #1F2937
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #1F2937
+skinparam ArrowColor #1F2937
+skinparam ArrowFontSize 11
+skinparam ArrowFontColor #1F2937
+' Orthogonal lines push case labels onto a horizontal segment instead of
+' overlapping the vertical arrow body
+skinparam linetype ortho
+skinparam padding 4
+skinparam DefaultFontSize 12
+
+start
+
+:App Launch;
+
+if (Has Account?) then (Yes)
+  :Login;
+else (No)
+  :Sign Up;
+endif
+
+:Home Screen;
+
+repeat
+  switch (Select Action)
+
+  case (Reflect)
+    :Select Emotion;
+    :Write Journal Entry;
+    :Submit;
+    if (Crisis Keywords Detected?) then (Yes)
+      :Show Helpline Banner;
+    else (No)
+      :Embed Query;
+      :Vector Search (MongoDB Atlas);
+      :Generate Guidance (Groq LLM);
+    endif
+    :Display Seerah Guidance;
+    switch (Guidance Action)
+    case (Track)
+      :Save Habit;
+    case (Bookmark)
+      :Save Bookmark;
+    case (Alternative)
+      :Re-query with Excluded Story;
+    case (Return)
+    endswitch
+
+  case (Habits)
+    :View Habit List;
+    switch (Habit Action)
+    case (Toggle)
+      :Mark Completion;
+    case (Add)
+      :Create New Habit;
+    case (Edit)
+      :Update Habit;
+    case (Archive)
+      :Soft-Delete;
+    endswitch
+
+  case (Community)
+    :View Posts;
+    switch (Community Action)
+    case (Post)
+      :Publish Post;
+    case (Comment)
+      :Add Comment;
+    case (Like)
+      :Save Reaction;
+    endswitch
+
+  case (Profile)
+    :View Profile;
+    switch (Profile Action)
+    case (Edit)
+      :Update Profile;
+    case (Logout)
+      stop
+    endswitch
+
+  endswitch
+
+  :Return to Home;
+
+repeat while (Continue Using App?) is (Yes)
+->No;
+
+stop
+
+@enduml
