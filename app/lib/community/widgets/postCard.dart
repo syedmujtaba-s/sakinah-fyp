@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:sakinah/community/post.dart';
 import 'package:sakinah/community/widgets/comment.dart';
 
 class PostCard extends StatefulWidget {
@@ -88,10 +89,45 @@ class _PostCardState extends State<PostCard> {
                   ],
                 ),
               ),
+              // Owner-only menu — Edit + Delete. We hide the entire trailing
+              // affordance for non-authors so other users don't even see a
+              // disabled icon hinting at the moderation surface.
               if (isMyPost)
-                IconButton(
-                  icon: const Icon(Icons.delete_outline, size: 20, color: Colors.grey),
-                  onPressed: () => _confirmDelete(context, widget.postDoc.id),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 20, color: Colors.grey),
+                  tooltip: 'Post options',
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  onSelected: (value) {
+                    if (value == 'edit') {
+                      _openEditScreen(context, data);
+                    } else if (value == 'delete') {
+                      _confirmDelete(context, widget.postDoc.id);
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem<String>(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(Icons.edit_outlined, size: 18, color: Colors.black87),
+                          SizedBox(width: 10),
+                          Text('Edit'),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem<String>(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                          SizedBox(width: 10),
+                          Text('Delete', style: TextStyle(color: Colors.red)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
             ],
           ),
@@ -171,6 +207,25 @@ class _PostCardState extends State<PostCard> {
     } catch (_) {}
     
     if (mounted) setState(() => isLiking = false);
+  }
+
+  /// Opens the same screen used for *creating* a post, but in edit mode —
+  /// `CreatePostScreen` runs an `update()` instead of `add()` when given an
+  /// `editPostId`, and only mutates the fields the author may change
+  /// (title, body, tag). likeCount, comments, userId, createdAt all stay
+  /// pinned regardless of how many times the post is edited.
+  void _openEditScreen(BuildContext context, Map<String, dynamic> data) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CreatePostScreen(
+          editPostId: widget.postDoc.id,
+          initialTitle: data['postTitle'] as String? ?? '',
+          initialBody: data['postBody'] as String? ?? '',
+          initialTag: data['tag'] as String?,
+        ),
+      ),
+    );
   }
 
   void _confirmDelete(BuildContext context, String postId) {

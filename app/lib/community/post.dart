@@ -2,16 +2,32 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+/// Used both for *creating* a new community post and *editing* an existing
+/// one the user owns. Pass [editPostId] (plus the initial values from the
+/// existing doc) to switch into edit mode — the screen then PATCHes the
+/// existing document instead of creating a new one.
 class CreatePostScreen extends StatefulWidget {
-  const CreatePostScreen({super.key});
+  /// When provided, the screen runs in edit mode and updates this post id.
+  final String? editPostId;
+  final String? initialTitle;
+  final String? initialBody;
+  final String? initialTag;
+
+  const CreatePostScreen({
+    super.key,
+    this.editPostId,
+    this.initialTitle,
+    this.initialBody,
+    this.initialTag,
+  });
 
   @override
   State<CreatePostScreen> createState() => _CreatePostScreenState();
 }
 
 class _CreatePostScreenState extends State<CreatePostScreen> {
-  final _titleController = TextEditingController();
-  final _bodyController = TextEditingController();
+  late final TextEditingController _titleController;
+  late final TextEditingController _bodyController;
   bool _isSubmitting = false;
   String? _selectedTag;
 
@@ -25,6 +41,27 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
   ];
   final Color primaryColor = const Color(0xFF15803D);
 
+  bool get _isEditing => widget.editPostId != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _titleController = TextEditingController(text: widget.initialTitle ?? '');
+    _bodyController = TextEditingController(text: widget.initialBody ?? '');
+    // If the incoming tag is somehow no longer in the canonical list, fall
+    // back to "General" so the dropdown doesn't hit the assertion.
+    _selectedTag = (widget.initialTag != null && _tags.contains(widget.initialTag))
+        ? widget.initialTag
+        : null;
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _bodyController.dispose();
+    super.dispose();
+  }
+
   Future<void> _submitPost() async {
     if (_titleController.text.isEmpty || _selectedTag == null) return;
     setState(() => _isSubmitting = true);
@@ -33,33 +70,53 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // Fetch username
-      String username = user.displayName ?? 'Seeker';
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      if (userDoc.exists && userDoc.data()?['firstName'] != null) {
-        username = userDoc.data()!['firstName'];
-      }
+      if (_isEditing) {
+        // Edit path — only mutate the fields the author is allowed to
+        // change. Author identity, like/comment counts, createdAt all stay
+        // pinned. We attach an editedAt server timestamp so the UI can
+        // surface "(edited)" indicators later if the team wants to.
+        await FirebaseFirestore.instance
+            .collection('posts')
+            .doc(widget.editPostId)
+            .update({
+          'postTitle': _titleController.text.trim(),
+          'postBody': _bodyController.text.trim(),
+          'tag': _selectedTag,
+          'editedAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        // Create path — unchanged from before. Username is denormalised
+        // onto the post doc so feed reads don't fan out into a per-author
+        // user-doc fetch.
+        String username = user.displayName ?? 'Seeker';
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (userDoc.exists && userDoc.data()?['firstName'] != null) {
+          username = userDoc.data()!['firstName'];
+        }
 
-      await FirebaseFirestore.instance.collection('posts').add({
-        "username": username,
-        "userId": user.uid,
-        "postTitle": _titleController.text.trim(),
-        "postBody": _bodyController.text.trim(),
-        "tag": _selectedTag,
-        "likeCount": 0,
-        "commentCount": 0,
-        "likedBy": [],
-        "createdAt": FieldValue.serverTimestamp(),
-      });
+        await FirebaseFirestore.instance.collection('posts').add({
+          "username": username,
+          "userId": user.uid,
+          "postTitle": _titleController.text.trim(),
+          "postBody": _bodyController.text.trim(),
+          "tag": _selectedTag,
+          "likeCount": 0,
+          "commentCount": 0,
+          "likedBy": [],
+          "createdAt": FieldValue.serverTimestamp(),
+        });
+      }
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Error: $e")));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
@@ -78,9 +135,12 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           icon: const Icon(Icons.close, color: Colors.black),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text(
-          "Create Post",
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+        title: Text(
+          _isEditing ? "Edit Post" : "Create Post",
+          style: const TextStyle(
+            color: Colors.black,
+            fontWeight: FontWeight.bold,
+          ),
         ),
         actions: [
           TextButton(
@@ -92,7 +152,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Text(
-                    "Post",
+                    _isEditing ? "Save" : "Post",
                     style: TextStyle(
                       color: primaryColor,
                       fontWeight: FontWeight.bold,
