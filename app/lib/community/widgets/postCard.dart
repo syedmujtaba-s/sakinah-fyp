@@ -32,6 +32,10 @@ class _PostCardState extends State<PostCard> {
     final List likedBy = data['likedBy'] ?? [];
     final bool isLiked = likedBy.contains(user?.uid);
     final bool isMyPost = data['userId'] == user?.uid;
+    // Set whenever the author edits the post (post.dart writes this on
+    // update). The presence of the field is enough to flip the badge —
+    // we don't bother formatting the timestamp on the card.
+    final bool wasEdited = data['editedAt'] != null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -84,8 +88,41 @@ class _PostCardState extends State<PostCard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(username, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    if (tag.isNotEmpty)
-                      Text(tag, style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                    // Tag plus an "(edited)" badge when this post has been
+                    // updated since creation. The two pieces share a Row so
+                    // they collapse to just the tag (or just "edited") when
+                    // either one is missing.
+                    if (tag.isNotEmpty || wasEdited)
+                      Row(
+                        children: [
+                          if (tag.isNotEmpty)
+                            Text(
+                              tag,
+                              style: TextStyle(
+                                color: Colors.grey.shade500,
+                                fontSize: 12,
+                              ),
+                            ),
+                          if (wasEdited) ...[
+                            if (tag.isNotEmpty)
+                              Text(
+                                ' • ',
+                                style: TextStyle(
+                                  color: Colors.grey.shade400,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            Text(
+                              'edited',
+                              style: TextStyle(
+                                color: Colors.grey.shade500,
+                                fontSize: 12,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
                   ],
                 ),
               ),
