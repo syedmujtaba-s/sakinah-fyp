@@ -1,6 +1,17 @@
+import sys
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+# Force stdout/stderr to UTF-8 so debug prints don't crash the request
+# handler when the journal entry contains emoji (Windows default is
+# cp1252 which dies on a 😂). Python 3.7+ exposes reconfigure().
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
 load_dotenv()
 

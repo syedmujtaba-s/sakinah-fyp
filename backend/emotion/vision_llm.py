@@ -44,10 +44,12 @@ VISION_MODEL = os.getenv(
 # The Sakinah-15 taxonomy. Must match SUPPORTED_EMOTIONS in
 # guidance_router.py and SAKINAH_15 in fusion.py — keep these three lists
 # in lockstep.
+# Mirror of the list in fusion.py — now 16 entries after adding "neutral".
 SAKINAH_15 = [
     "happy", "sad", "anxious", "angry", "confused",
     "grateful", "lonely", "stressed", "fearful", "guilty",
     "hopeless", "overwhelmed", "rejected", "embarrassed", "lost",
+    "neutral",
 ]
 _VALID = set(SAKINAH_15)
 
@@ -55,15 +57,27 @@ _VALID = set(SAKINAH_15)
 # so we can parse without regex gymnastics — Groq's JSON mode guarantees
 # valid JSON output.
 _SYSTEM_PROMPT = (
-    "You are an emotion-recognition expert. You will see a face image. "
-    "Pick exactly one emotion that best describes what the person is "
-    "feeling, from this list:\n"
-    + ", ".join(SAKINAH_15)
-    + "\n\nReply with valid JSON: "
-    + '{"emotion": "<one of the listed words>", "confidence": <number 0-1>}\n'
-    "Pick \"confused\" only if the face is genuinely ambiguous. "
-    "Pick \"lost\" only for a vacant or disoriented expression. "
-    "Strongly prefer the most specific match."
+    "You are an expert at reading human emotion from a face. Look at the "
+    "face and pick ONE label that best describes what the person feels.\n\n"
+    "Allowed labels:\n"
+    "  neutral, happy, sad, anxious, angry, grateful, lonely, stressed,\n"
+    "  fearful, guilty, hopeless, overwhelmed, rejected, embarrassed,\n"
+    "  confused, lost\n\n"
+    "STRICT RULES:\n"
+    "1. If the face is RELAXED, RESTING, or shows NO STRONG EMOTION, "
+    "answer \"neutral\". Do NOT force a stronger label on a neutral face.\n"
+    "2. \"confused\" and \"lost\" are LAST-RESORT labels. Only use "
+    "\"confused\" if the face actually shows confusion (furrowed brow, "
+    "head tilt, asymmetric expression). Only use \"lost\" if the gaze "
+    "is genuinely vacant or disoriented. Never use these as fallbacks "
+    "for hard-to-read faces — pick \"neutral\" instead.\n"
+    "3. For a face that DOES show emotion, prefer the most specific "
+    "match (e.g. soft smile -> happy; furrowed brow + tense jaw -> "
+    "stressed; downturned mouth + tired eyes -> sad).\n"
+    "4. Use confidence < 0.5 only when truly uncertain. For a clearly "
+    "neutral face, return neutral with confidence 0.7-0.9.\n\n"
+    'Reply with ONLY this JSON, nothing else: '
+    '{"emotion": "<word>", "confidence": <0-1>}'
 )
 
 

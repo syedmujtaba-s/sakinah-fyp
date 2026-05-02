@@ -500,6 +500,7 @@ class _EmotionCheckinScreenState extends State<EmotionCheckinScreen> {
         runSpacing: 10,
         alignment: WrapAlignment.center,
         children: const [
+          _MoodChipData('Neutral', '😐'),
           _MoodChipData('Happy', '😊'),
           _MoodChipData('Sad', '😔'),
           _MoodChipData('Anxious', '😰'),
@@ -628,6 +629,11 @@ class _ConfidenceBar extends StatelessWidget {
 }
 
 // ─── Source breakdown chip ──────────────────────────────────────────────
+// Shows what each contributing model said. The fusion result on top
+// (the big "Happy"/"Confused"/etc. label) can disagree with these raw
+// reads — particularly when the vision LLM overrides the face CNN —
+// so surfacing the breakdown is essential for the user to understand
+// "why did it pick this".
 class _SourceChip extends StatelessWidget {
   final EmotionDetectionResult result;
   const _SourceChip({required this.result});
@@ -640,6 +646,9 @@ class _SourceChip extends StatelessWidget {
     }
     if (result.textPredicted != null) {
       parts.add('Text: ${result.textPredicted}');
+    }
+    if (result.visionPredicted != null) {
+      parts.add('Vision: ${result.visionPredicted}');
     }
     if (parts.isEmpty) return const SizedBox.shrink();
     return Container(

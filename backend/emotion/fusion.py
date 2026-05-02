@@ -31,10 +31,15 @@ from __future__ import annotations
 
 from typing import Optional
 
+# Variable name kept as SAKINAH_15 for backward-compat (test_emotion.py
+# references it). Actual count is now 16 — "neutral" was added 2026-04-27
+# so a calm/resting face has somewhere to land instead of being shoved
+# into "confused".
 SAKINAH_15 = [
     "happy", "sad", "anxious", "angry", "confused",
     "grateful", "lonely", "stressed", "fearful", "guilty",
     "hopeless", "overwhelmed", "rejected", "embarrassed", "lost",
+    "neutral",
 ]
 
 
@@ -48,7 +53,12 @@ FACE_TO_SAKINAH: dict[str, dict[str, float]] = {
     "Disgust":   {"embarrassed": 0.40, "rejected": 0.30, "angry": 0.20, "guilty": 0.10},
     "Fear":      {"fearful": 0.55, "anxious": 0.30, "stressed": 0.10, "overwhelmed": 0.05},
     "Happiness": {"happy": 0.80, "grateful": 0.20},
-    "Neutral":   {"confused": 0.40, "lost": 0.30, "happy": 0.15, "sad": 0.15},
+    # A neutral resting face is now its own Sakinah emotion. The user
+    # complained (rightly) that mapping Neutral -> confused/grateful was
+    # putting words in their mouth. We give it 0.85 mass on "neutral"
+    # itself and only sprinkle small adjacent mass for cases where the
+    # face barely tilts in some direction.
+    "Neutral":   {"neutral": 0.85, "grateful": 0.05, "happy": 0.05, "sad": 0.05},
     "Sadness":   {"sad": 0.50, "lonely": 0.20, "hopeless": 0.20, "lost": 0.10},
     "Surprise":  {"confused": 0.40, "overwhelmed": 0.30, "anxious": 0.20, "happy": 0.10},
 }
@@ -60,7 +70,7 @@ TEXT_TO_SAKINAH: dict[str, dict[str, float]] = {
     "disgust": {"embarrassed": 0.40, "rejected": 0.30, "angry": 0.20, "guilty": 0.10},
     "fear":    {"fearful": 0.45, "anxious": 0.40, "stressed": 0.10, "overwhelmed": 0.05},
     "joy":     {"happy": 0.75, "grateful": 0.25},
-    "neutral": {"confused": 0.35, "lost": 0.35, "happy": 0.15, "sad": 0.15},
+    "neutral": {"neutral": 0.85, "happy": 0.05, "grateful": 0.05, "sad": 0.05},
     "sadness": {"sad": 0.45, "lonely": 0.20, "hopeless": 0.20, "lost": 0.10, "guilty": 0.05},
     "surprise":{"confused": 0.35, "overwhelmed": 0.30, "anxious": 0.20, "happy": 0.15},
 }

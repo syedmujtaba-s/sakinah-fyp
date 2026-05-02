@@ -134,6 +134,8 @@ class EmotionDetectionResult {
   final String? textPredicted;            // raw RoBERTa label, e.g. "joy"
   final double textConfidence;
   final bool textTranslated;
+  final String? visionPredicted;          // vision-LLM Sakinah-15 label (Lever 2)
+  final double visionConfidence;
   final String? faceError;                // present when image was sent but face wasn't detected
   final String? faceErrorDetail;
 
@@ -151,6 +153,8 @@ class EmotionDetectionResult {
     this.textPredicted,
     this.textConfidence = 0.0,
     this.textTranslated = false,
+    this.visionPredicted,
+    this.visionConfidence = 0.0,
     this.faceError,
     this.faceErrorDetail,
   });
@@ -171,6 +175,8 @@ class EmotionDetectionResult {
       textPredicted: json['text_predicted'] as String?,
       textConfidence: (json['text_confidence'] ?? 0.0).toDouble(),
       textTranslated: (json['text_translated'] ?? false) as bool,
+      visionPredicted: json['vision_predicted'] as String?,
+      visionConfidence: (json['vision_confidence'] ?? 0.0).toDouble(),
       faceError: json['face_error'] as String?,
       faceErrorDetail: json['face_error_detail'] as String?,
     );

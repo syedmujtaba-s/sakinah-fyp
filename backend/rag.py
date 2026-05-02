@@ -361,21 +361,27 @@ def _local_search(
 # =========================================================
 def ingest_from_data_folder():
     """
-    Scan data/stories/ for .jsonl files. Each line is a story JSON object.
-    Inserts stories that don't already exist (by title), then indexes them.
+    Recursively scan data/stories/ for .jsonl files. Each line is a story
+    JSON object. Inserts stories that don't already exist (by title),
+    then indexes them. Subfolders are walked too — drop a whole "Tafseer
+    ibn Kathir" or "Sahih Bukhari" directory under data/stories/ and it
+    gets picked up wholesale on next startup.
     """
     if not os.path.isdir(DATA_DIR):
         return
 
-    jsonl_files = [f for f in os.listdir(DATA_DIR) if f.endswith(".jsonl")]
-    if not jsonl_files:
+    jsonl_paths: list[str] = []
+    for root, _dirs, files in os.walk(DATA_DIR):
+        for f in files:
+            if f.endswith(".jsonl"):
+                jsonl_paths.append(os.path.join(root, f))
+    if not jsonl_paths:
         return
 
-    print(f"Auto-ingest: found {len(jsonl_files)} .jsonl file(s) in {DATA_DIR}")
+    print(f"Auto-ingest: found {len(jsonl_paths)} .jsonl file(s) under {DATA_DIR}")
 
     total_added = 0
-    for filename in jsonl_files:
-        filepath = os.path.join(DATA_DIR, filename)
+    for filepath in jsonl_paths:
         with open(filepath, "r", encoding="utf-8") as f:
             for line_num, line in enumerate(f, 1):
                 line = line.strip()
@@ -384,14 +390,14 @@ def ingest_from_data_folder():
                 try:
                     story = json.loads(line)
                 except json.JSONDecodeError as e:
-                    print(f"  {filename}:{line_num} — invalid JSON: {e}")
+                    print(f"  {filepath}:{line_num} - invalid JSON: {e}")
                     continue
 
                 # Validate required fields
                 required = {"title", "period", "emotions", "summary", "story", "lessons", "practical_advice"}
                 missing = required - set(story.keys())
                 if missing:
-                    print(f"  {filename}:{line_num} — missing fields: {missing}")
+                    print(f"  {filepath}:{line_num} - missing fields: {missing}")
                     continue
 
                 # Skip duplicates

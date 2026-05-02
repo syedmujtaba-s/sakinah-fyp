@@ -20,10 +20,16 @@ else:
 
 
 # --- Supported Emotions ---
+# 16 entries — "neutral" added 2026-04-27 so a calm/resting face has a
+# label of its own. When users come in with no strong emotion, the RAG
+# step (search_stories) won't find any "neutral"-tagged Seerah stories
+# in our corpus, but the fallback path in _dedupe_and_fetch returns the
+# best match anyway so the guidance flow stays unbroken.
 SUPPORTED_EMOTIONS = [
     "happy", "sad", "anxious", "angry", "confused",
     "grateful", "lonely", "stressed", "fearful", "guilty",
-    "hopeless", "overwhelmed", "rejected", "embarrassed", "lost"
+    "hopeless", "overwhelmed", "rejected", "embarrassed", "lost",
+    "neutral",
 ]
 
 # --- Crisis keywords — checked before RAG/Groq ---
