@@ -15,7 +15,7 @@ class HeroGreetingCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(24, 26, 24, 24),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFF15803D), Color(0xFF14532D)],
@@ -34,46 +34,52 @@ class HeroGreetingCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          RichText(
-            text: TextSpan(
-              children: [
-                const TextSpan(
-                  text: 'Assalamu Alaikum, ',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                TextSpan(
-                  text: name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
+          const Text(
+            'Assalamu Alaikum,',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 16,
+              fontWeight: FontWeight.w500,
+              letterSpacing: 0.2,
             ),
           ),
-          const SizedBox(height: 18),
-          const Icon(Icons.favorite_rounded, color: Colors.white70, size: 32),
+          const SizedBox(height: 4),
+          Text(
+            name,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 30,
+              fontWeight: FontWeight.bold,
+              height: 1.05,
+              letterSpacing: 0.2,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Container(
+            height: 1,
+            width: 44,
+            color: Colors.white.withOpacity(0.35),
+          ),
           const SizedBox(height: 16),
           const Text(
             'How is your heart feeling today?',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              height: 1.2,
+              fontSize: 17,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           const Text(
             'Check in to receive Seerah guidance.',
-            style: TextStyle(color: Colors.white70, fontSize: 14),
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 13,
+              height: 1.4,
+            ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 22),
           ElevatedButton(
             onPressed: onCheckin,
             style: ElevatedButton.styleFrom(
@@ -84,13 +90,20 @@ class HeroGreetingCard extends StatelessWidget {
                 borderRadius: BorderRadius.circular(12),
               ),
               padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 12,
+                horizontal: 22,
+                vertical: 13,
               ),
             ),
-            child: const Text(
-              'Start Check-in',
-              style: TextStyle(fontWeight: FontWeight.bold),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Start Check-in',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                ),
+                SizedBox(width: 6),
+                Icon(Icons.arrow_forward_rounded, size: 16),
+              ],
             ),
           ),
         ],
