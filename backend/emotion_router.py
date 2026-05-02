@@ -36,10 +36,16 @@ from models import EmotionDetectionResponse
 
 router = APIRouter(prefix="/api/emotion", tags=["emotion"])
 
+import os
+
 # --- Config ---
 MAX_IMAGE_BYTES = 2 * 1024 * 1024     # 2 MB hard cap (client compresses to ~30KB)
 RATE_LIMIT_WINDOW = 60                # seconds
 RATE_LIMIT_MAX = 30                   # requests per window per client
+# Set SAKINAH_DISABLE_RATE_LIMIT=1 to bypass the limiter (used by the
+# accuracy benchmark which fires 100+ requests in a tight loop). Never
+# enable this in production.
+RATE_LIMIT_DISABLED = os.environ.get("SAKINAH_DISABLE_RATE_LIMIT") == "1"
 
 _rate_buckets: dict[str, deque[float]] = defaultdict(deque)
 
@@ -57,6 +63,8 @@ def _client_key(request: Request) -> str:
 
 def _check_rate_limit(key: str) -> bool:
     """Return True if within limit, False if exceeded."""
+    if RATE_LIMIT_DISABLED:
+        return True
     now = time.time()
     bucket = _rate_buckets[key]
     while bucket and now - bucket[0] > RATE_LIMIT_WINDOW:
