@@ -43,6 +43,9 @@ sakinah/build/
 
 # Secrets / local configs
 app/android/app/google-services.json
+backend/serviceAccountKey.json
+backend/*serviceAccount*.json
+*serviceAccount*.json
 
 # Admin panel — lives in its own git repo
 sakinah-admin/

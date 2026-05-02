@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dashboard_screen.dart';
 import 'emotion_checkin_screen.dart';
 import 'habits/habit_tracker_screen.dart';
 import 'profile/profile_screen.dart';
 import '../community/community.dart';
+import '../widgets/sakinah_drawer.dart';
 
 class HomeMain extends StatefulWidget {
   const HomeMain({super.key});
@@ -13,23 +16,84 @@ class HomeMain extends StatefulWidget {
 }
 
 class _HomeMainState extends State<HomeMain> {
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   int _currentIndex = 0;
 
-  // These are the screens for the tabs.
-  // We use placeholders for Habits, Community, and Profile for now.
-  final List<Widget> _screens = [
-    const DashboardScreen(),
-    const HabitTrackerScreen(),
-    const SizedBox(), // Placeholder for the middle button (handled in onTap)
-    const CommunityScreen(),
-    const ProfileScreen(),
-  ];
+  String _displayName = 'Seeker';
+  String _email = '';
+  String? _photoBase64;
+  String? _photoUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserSummary();
+  }
+
+  Future<void> _loadUserSummary() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      final data = doc.data() ?? {};
+      if (!mounted) return;
+      setState(() {
+        _displayName = (data['firstName'] as String?) ??
+            user.displayName?.split(' ').first ??
+            'Seeker';
+        _email = user.email ?? '';
+        _photoBase64 = data['photoBase64'] as String?;
+        _photoUrl = (data['photoUrl'] as String?) ?? user.photoURL;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _displayName = user.displayName?.split(' ').first ?? 'Seeker';
+        _email = user.email ?? '';
+      });
+    }
+  }
+
+  void _switchTab(int index) {
+    if (index == 2) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const EmotionCheckinScreen()),
+      );
+      return;
+    }
+    setState(() => _currentIndex = index);
+  }
+
+  void _openDrawer() => _scaffoldKey.currentState?.openDrawer();
 
   @override
   Widget build(BuildContext context) {
+    final screens = <Widget>[
+      DashboardScreen(
+        onNavigateToTab: _switchTab,
+        onOpenDrawer: _openDrawer,
+      ),
+      const HabitTrackerScreen(),
+      const SizedBox.shrink(),
+      const CommunityScreen(),
+      const ProfileScreen(),
+    ];
+
     return Scaffold(
-      // IndexedStack keeps the state of the pages so they don't reload when switching tabs
-      body: IndexedStack(index: _currentIndex, children: _screens),
+      key: _scaffoldKey,
+      drawer: SakinahDrawer(
+        currentIndex: _currentIndex,
+        onPrimarySelected: _switchTab,
+        displayName: _displayName,
+        email: _email,
+        photoBase64: _photoBase64,
+        photoUrl: _photoUrl,
+      ),
+      body: IndexedStack(index: _currentIndex, children: screens),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -43,23 +107,10 @@ class _HomeMainState extends State<HomeMain> {
         ),
         child: BottomNavigationBar(
           currentIndex: _currentIndex,
-          onTap: (index) {
-            // Logic: If user taps the middle button (Index 2), open Check-in Screen
-            if (index == 2) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const EmotionCheckinScreen()),
-              );
-              return;
-            }
-
-            setState(() {
-              _currentIndex = index;
-            });
-          },
+          onTap: _switchTab,
           type: BottomNavigationBarType.fixed,
           backgroundColor: Colors.white,
-          selectedItemColor: const Color(0xFF15803D), // Sakinah Green
+          selectedItemColor: const Color(0xFF15803D),
           unselectedItemColor: Colors.grey.shade400,
           showUnselectedLabels: true,
           selectedLabelStyle: const TextStyle(
@@ -77,7 +128,6 @@ class _HomeMainState extends State<HomeMain> {
               icon: Icon(Icons.task_alt_rounded),
               label: 'Habits',
             ),
-            // The Big Middle Button
             BottomNavigationBarItem(
               icon: Container(
                 padding: const EdgeInsets.all(12),
@@ -113,4 +163,3 @@ class _HomeMainState extends State<HomeMain> {
     );
   }
 }
-

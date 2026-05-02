@@ -27,7 +27,7 @@ class SakinahApp extends StatelessWidget {
       theme: ThemeData(
         fontFamily: 'Sans',
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF15803D), // calm green
+          seedColor: const Color(0xFF15803D),
         ),
         useMaterial3: true,
       ),

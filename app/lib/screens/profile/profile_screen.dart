@@ -9,6 +9,7 @@ import '../../auth/login.dart';
 import 'feedback_screen.dart';
 import 'privacy_screen.dart';
 import 'terms_screen.dart';
+import 'photo_preview_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -408,26 +409,48 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Center(
                     child: Stack(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: primaryColor.withOpacity(0.2),
-                              width: 2,
-                            ),
-                          ),
-                          child: CircleAvatar(
-                            radius: 60,
-                            backgroundColor: Colors.grey.shade100,
-                            backgroundImage: _profileImageProvider,
-                            child: !_hasProfileImage
-                                ? Icon(
-                                    Icons.person,
-                                    size: 60,
-                                    color: Colors.grey.shade400,
+                        GestureDetector(
+                          onTap: _hasProfileImage
+                              ? () => Navigator.push(
+                                    context,
+                                    PageRouteBuilder(
+                                      opaque: false,
+                                      barrierColor: Colors.black,
+                                      transitionDuration:
+                                          const Duration(milliseconds: 250),
+                                      reverseTransitionDuration:
+                                          const Duration(milliseconds: 200),
+                                      pageBuilder: (_, __, ___) =>
+                                          PhotoPreviewScreen(
+                                        image: _profileImageProvider!,
+                                      ),
+                                    ),
                                   )
-                                : null,
+                              : null,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: primaryColor.withOpacity(0.2),
+                                width: 2,
+                              ),
+                            ),
+                            child: Hero(
+                              tag: 'profile-photo-preview',
+                              child: CircleAvatar(
+                                radius: 60,
+                                backgroundColor: Colors.grey.shade100,
+                                backgroundImage: _profileImageProvider,
+                                child: !_hasProfileImage
+                                    ? Icon(
+                                        Icons.person,
+                                        size: 60,
+                                        color: Colors.grey.shade400,
+                                      )
+                                    : null,
+                              ),
+                            ),
                           ),
                         ),
                         // Camera/Edit button
