@@ -6,8 +6,8 @@ class EmotionDetectionResponse(BaseModel):
     predicted_emotion: str                    # one of Sakinah's 15
     confidence: float
     scores: dict[str, float]                  # full 15-way distribution
-    sources_used: list[str]                   # ["face"], ["text"], or both
-    fusion_strategy: str                      # "weighted_avg" | "single" | "higher_confidence:face" | ...
+    sources_used: list[str]                   # ["face"], ["text"], "vision", or any combination
+    fusion_strategy: str                      # "weighted_avg" | "single" | "higher_confidence:face" | "vision_override" | ...
     low_confidence: bool                      # UI flag — show manual picker
     # Per-modality breakdown (nullable when that modality wasn't used).
     face_predicted: str | None = None
@@ -17,6 +17,10 @@ class EmotionDetectionResponse(BaseModel):
     text_predicted: str | None = None
     text_confidence: float = 0.0
     text_translated: bool = False
+    # Vision-LLM fallback (Lever 2). Populated when face confidence was
+    # below threshold and we asked Groq's vision model for a second opinion.
+    vision_predicted: str | None = None
+    vision_confidence: float = 0.0
 
 
 # --- Guidance Request Model ---

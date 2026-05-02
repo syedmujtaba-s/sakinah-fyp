@@ -31,6 +31,8 @@ AFFECTNET_LABELS = [
 # Lazy singletons — first call costs ~2-4s, subsequent calls <300ms on CPU.
 _recognizer = None
 _face_cascade = None
+_mp_detector = None
+_mp_module = None
 
 
 def _get_recognizer():
@@ -41,6 +43,52 @@ def _get_recognizer():
         _recognizer = HSEmotionRecognizer(model_name="enet_b2_8")
         print("[face_model] HSEmotion ready.")
     return _recognizer
+
+
+def _get_mp_detector():
+    """MediaPipe BlazeFace — the modern replacement for OpenCV's 1990s-era
+    Haar cascade. Much higher recall on tilted faces, partial occlusion,
+    and low-resolution / low-contrast inputs. Falls back gracefully when
+    mediapipe isn't installed OR exposes an unfamiliar API.
+
+    Two API generations exist in the wild:
+      - Old (`mediapipe.solutions.face_detection`) — pre-0.10.30, simpler.
+      - New (`mediapipe.tasks.python.vision.FaceDetector`) — 0.10.30+,
+        requires a .tflite asset path. We don't bundle the asset so we
+        skip the new API for now.
+
+    Returns the live detector object, or `False` (sentinel) when no
+    usable MediaPipe is available — callers fall back to Haar."""
+    global _mp_detector, _mp_module
+    if _mp_detector is None:
+        try:
+            import mediapipe as mp
+            _mp_module = mp
+            # Try the legacy `solutions` namespace first.
+            if hasattr(mp, "solutions") and hasattr(
+                mp.solutions, "face_detection"
+            ):
+                _mp_detector = mp.solutions.face_detection.FaceDetection(
+                    model_selection=1,
+                    min_detection_confidence=0.3,
+                )
+                print("[face_model] MediaPipe BlazeFace (solutions API) ready.")
+            else:
+                # New `tasks` API needs a downloaded .tflite asset which we
+                # don't ship. Skip cleanly — Haar will pick up the slack.
+                print("[face_model] MediaPipe present but only exposes "
+                      "the new tasks API (no bundled model); using Haar.")
+                _mp_detector = False
+        except ImportError:
+            print("[face_model] mediapipe not installed; falling back to Haar.")
+            _mp_detector = False
+        except Exception as e:
+            # Any other surprise (binary mismatch, missing CUDA, etc.) —
+            # don't crash the server. Log and fall back.
+            print(f"[face_model] MediaPipe init failed ({type(e).__name__}: "
+                  f"{e}); falling back to Haar.")
+            _mp_detector = False
+    return _mp_detector
 
 
 def _get_face_cascade():
@@ -54,7 +102,8 @@ def _get_face_cascade():
 
 
 def warmup() -> None:
-    """Pre-load both the cascade and HSEmotion. Called from main.py startup."""
+    """Pre-load detectors and HSEmotion. Called from main.py startup."""
+    _get_mp_detector()
     _get_face_cascade()
     _get_recognizer()
 
@@ -66,13 +115,44 @@ def _decode_image(image_bytes: bytes) -> np.ndarray:
     return np.array(img)
 
 
-def _detect_faces(rgb: np.ndarray):
-    """Run Haar cascade on a single orientation. Returns list of (x,y,w,h)."""
+def _detect_faces_mp(rgb: np.ndarray):
+    """Run MediaPipe BlazeFace. Returns list of (x,y,w,h) in pixel coords,
+    or empty list if MediaPipe isn't available / didn't detect anything."""
+    detector = _get_mp_detector()
+    if not detector:
+        return []
+    h, w = rgb.shape[:2]
+    results = detector.process(rgb)
+    if not results.detections:
+        return []
+    out = []
+    for d in results.detections:
+        bbox = d.location_data.relative_bounding_box
+        x = max(0, int(bbox.xmin * w))
+        y = max(0, int(bbox.ymin * h))
+        bw = max(1, int(bbox.width * w))
+        bh = max(1, int(bbox.height * h))
+        out.append((x, y, bw, bh))
+    return out
+
+
+def _detect_faces_haar(rgb: np.ndarray):
+    """Legacy Haar cascade — kept as a fallback for when MediaPipe misses."""
     cascade = _get_face_cascade()
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     return cascade.detectMultiScale(
         gray, scaleFactor=1.15, minNeighbors=5, minSize=(60, 60)
     )
+
+
+def _detect_faces(rgb: np.ndarray):
+    """Try MediaPipe first (much higher recall), fall back to Haar if it
+    finds nothing — the two miss in different ways and the union covers
+    significantly more cases than either alone."""
+    faces = _detect_faces_mp(rgb)
+    if len(faces) > 0:
+        return faces
+    return _detect_faces_haar(rgb)
 
 
 def _crop_largest_face(rgb: np.ndarray) -> Optional[np.ndarray]:

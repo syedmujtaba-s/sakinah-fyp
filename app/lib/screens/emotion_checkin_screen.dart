@@ -122,7 +122,39 @@ class _EmotionCheckinScreenState extends State<EmotionCheckinScreen> {
   }
 
   // ─── Confirmation sheet ─────────────────────────────────────────────
+  // Lever 3 — confidence-gated UX:
+  //   - confidence >= 0.85  -> skip the sheet entirely, just route to the
+  //     journal with a tiny SnackBar so the user knows what was picked.
+  //     Saves the user a tap when the AI is clearly right.
+  //   - 0.45 <= confidence < 0.85 -> show the sheet (status quo).
+  //   - confidence < 0.45 -> show the sheet PLUS a "I'm not very sure"
+  //     warning, and visually de-emphasise Confirm so the user is steered
+  //     toward the manual grid.
+  // The user can always undo a low-friction accept by re-opening the
+  // check-in screen — the journal entry isn't saved until they actually
+  // type something.
   void _showConfirmationSheet(EmotionDetectionResult result) {
+    const autoAcceptThreshold = 0.85;
+    const lowConfidenceThreshold = 0.45;
+
+    if (result.confidence >= autoAcceptThreshold) {
+      _lastAiSuggestion = null; // accepted, no override to log
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 2),
+          backgroundColor: const Color(0xFF15803D),
+          content: Text(
+            'Detected as ${result.displayEmotion}',
+            style: const TextStyle(color: Colors.white),
+          ),
+        ),
+      );
+      _navigateToJournal();
+      return;
+    }
+
+    final isLowConfidence = result.confidence < lowConfidenceThreshold;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.white,
@@ -136,6 +168,28 @@ class _EmotionCheckinScreenState extends State<EmotionCheckinScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (isLowConfidence)
+              Container(
+                padding: const EdgeInsets.all(10),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline,
+                        color: Colors.amber, size: 18),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        "I'm not very sure — please verify or pick manually.",
+                        style: TextStyle(fontSize: 12, color: Colors.black87),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             const Text(
               "We sensed that you are feeling",
               style: TextStyle(color: Colors.grey, fontSize: 14),
@@ -154,54 +208,102 @@ class _EmotionCheckinScreenState extends State<EmotionCheckinScreen> {
             const SizedBox(height: 12),
             _SourceChip(result: result),
             const SizedBox(height: 24),
+            // When confidence is low, swap the visual weight: "Pick manually"
+            // becomes the elevated primary action, "Confirm" becomes the
+            // outlined secondary. When confidence is in the comfortable
+            // 0.45-0.85 band, keep the original layout.
             Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      setState(() {
-                        _stage = _Stage.manual;
-                        _detectedMood = null;
-                      });
-                    },
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      side: BorderSide(color: Colors.grey.shade300),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+              children: isLowConfidence
+                  ? [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _lastAiSuggestion = null;
+                            _navigateToJournal();
+                          },
+                          style: OutlinedButton.styleFrom(
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 16),
+                            side: BorderSide(color: Colors.grey.shade300),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            "Confirm anyway",
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ),
                       ),
-                    ),
-                    child: const Text(
-                      "No, I'm not",
-                      style: TextStyle(color: Colors.grey),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.pop(context);
-                      // User accepted the AI's suggestion — clear the held
-                      // result so a later manual pick on the same screen
-                      // (after they cancel back to manual) doesn't get
-                      // misattributed as an "override".
-                      _lastAiSuggestion = null;
-                      _navigateToJournal();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: const Color(0xFF15803D),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            setState(() {
+                              _stage = _Stage.manual;
+                              _detectedMood = null;
+                            });
+                          },
+                          style: ElevatedButton.styleFrom(
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 16),
+                            backgroundColor: const Color(0xFF15803D),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text("Pick manually"),
+                        ),
                       ),
-                    ),
-                    child: const Text("Confirm"),
-                  ),
-                ),
-              ],
+                    ]
+                  : [
+                      Expanded(
+                        child: OutlinedButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            setState(() {
+                              _stage = _Stage.manual;
+                              _detectedMood = null;
+                            });
+                          },
+                          style: OutlinedButton.styleFrom(
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 16),
+                            side: BorderSide(color: Colors.grey.shade300),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            "No, I'm not",
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _lastAiSuggestion = null;
+                            _navigateToJournal();
+                          },
+                          style: ElevatedButton.styleFrom(
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 16),
+                            backgroundColor: const Color(0xFF15803D),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text("Confirm"),
+                        ),
+                      ),
+                    ],
             ),
           ],
         ),

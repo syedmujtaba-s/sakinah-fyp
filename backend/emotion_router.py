@@ -31,7 +31,7 @@ from typing import Optional
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse
 
-from emotion import face_model, text_model, fusion
+from emotion import face_model, text_model, vision_llm, fusion
 from models import EmotionDetectionResponse
 
 router = APIRouter(prefix="/api/emotion", tags=["emotion"])
@@ -46,6 +46,15 @@ RATE_LIMIT_MAX = 30                   # requests per window per client
 # accuracy benchmark which fires 100+ requests in a tight loop). Never
 # enable this in production.
 RATE_LIMIT_DISABLED = os.environ.get("SAKINAH_DISABLE_RATE_LIMIT") == "1"
+
+# Vision-LLM fallback gate. We only burn a Groq vision call when the face
+# CNN is uncertain. Above this threshold we trust HSEmotion's read; below
+# it we ask the LLM. 0.65 was tuned against the FER-2013 benchmark — the
+# class on which we get 53% accuracy (disgust) typically returns scores
+# well above 0.65, while the failing classes (fear/sad) return below.
+VISION_FALLBACK_THRESHOLD = float(
+    os.environ.get("SAKINAH_VISION_FALLBACK_THRESHOLD", "0.65")
+)
 
 _rate_buckets: dict[str, deque[float]] = defaultdict(deque)
 
@@ -126,8 +135,31 @@ async def detect_emotion(
     elif text_task:
         text_result = await text_task
 
+    # ---- Vision-LLM fallback (Lever 2) ----
+    # Only fires when:
+    #   1. The user actually sent an image,
+    #   2. We *did* successfully decode + locate a face on it,
+    #   3. The face CNN's confidence on that face is below threshold.
+    # Otherwise we either have nothing to give the LLM (no image) or we
+    # already trust the CNN's high-confidence answer.
+    vision_result: Optional[dict] = None
+    should_invoke_vision = (
+        has_image
+        and face_result is not None
+        and face_result.get("ok")
+        and float(face_result.get("confidence", 0.0)) < VISION_FALLBACK_THRESHOLD
+        and vision_llm.is_available()
+    )
+    if should_invoke_vision:
+        try:
+            vision_result = await vision_llm.predict(image_bytes)
+        except Exception as e:
+            # Vision is a best-effort booster — never let it crash the request.
+            print(f"[emotion_router] vision_llm.predict raised: {e}")
+            vision_result = {"ok": False, "error": "exception", "detail": str(e)}
+
     # ---- Fuse ----
-    fused = fusion.fuse(face=face_result, text=text_result)
+    fused = fusion.fuse(face=face_result, text=text_result, vision=vision_result)
 
     # ---- Build response ----
     response = EmotionDetectionResponse(
@@ -144,6 +176,8 @@ async def detect_emotion(
         text_predicted=fused.get("text_predicted"),
         text_confidence=round(fused.get("text_confidence", 0.0), 4),
         text_translated=bool(text_result and text_result.get("translated")),
+        vision_predicted=fused.get("vision_predicted"),
+        vision_confidence=round(fused.get("vision_confidence", 0.0), 4),
     )
 
     # When face was attempted but no face was detected, surface a helpful hint

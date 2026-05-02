@@ -85,20 +85,43 @@ def _argmax(d: dict[str, float]) -> tuple[str, float]:
     return label, float(d[label])
 
 
+def _vision_to_sakinah(vision_result: dict) -> Optional[dict[str, float]]:
+    """Vision LLM already speaks Sakinah-15 directly, so projection is
+    just `{predicted: confidence, others: 0}`. Returns None when the
+    label isn't recognised (defensive — should never happen because
+    vision_llm validates against SAKINAH_15 internally)."""
+    label = vision_result.get("predicted")
+    if label not in SAKINAH_15:
+        return None
+    conf = float(vision_result.get("confidence", 0.7))
+    out = {l: 0.0 for l in SAKINAH_15}
+    out[label] = conf
+    # Spread the residual mass uniformly so the distribution sums to 1.
+    residual = (1.0 - conf) / (len(SAKINAH_15) - 1)
+    for l in SAKINAH_15:
+        if l != label:
+            out[l] = residual
+    return out
+
+
 def fuse(
     face: Optional[dict] = None,
     text: Optional[dict] = None,
+    vision: Optional[dict] = None,
     *,
     disagreement_margin: float = 0.20,
     strong_confidence: float = 0.55,
     weak_confidence: float = 0.35,
 ) -> dict:
     """
-    Fuse face + text emotion predictions into a single Sakinah-15 result.
+    Fuse face + text + vision-LLM predictions into a single Sakinah-15 result.
 
     Args:
         face: result dict from emotion.face_model.predict, or None.
         text: result dict from emotion.text_model.predict, or None.
+        vision: result dict from emotion.vision_llm.predict, or None.
+                Vision LLM already produces Sakinah-15 labels directly,
+                so no projection step is needed for that source.
 
     Returns:
         {
@@ -111,6 +134,8 @@ def fuse(
             "face_confidence": 0.68,
             "text_predicted": "fear",
             "text_confidence": 0.81,
+            "vision_predicted": "anxious",
+            "vision_confidence": 0.86,
             "low_confidence": False,                       # UI flag for manual fallback
         }
     """
@@ -122,6 +147,8 @@ def fuse(
     face_conf = 0.0
     text_label = None
     text_conf = 0.0
+    vision_label = None
+    vision_conf = 0.0
 
     if face and face.get("ok"):
         face_proj = _project(face["scores"], FACE_TO_SAKINAH)
@@ -133,6 +160,31 @@ def fuse(
         text_label, text_conf = _argmax(text_proj)
         sources_used.append("text")
 
+    if vision and vision.get("ok"):
+        vision_label = vision.get("predicted")
+        vision_conf = float(vision.get("confidence", 0.0))
+        sources_used.append("vision")
+        # Vision LLM speaks Sakinah-15 directly. When it's confident
+        # (>= 0.6), we trust it as the final answer — it's empirically
+        # more accurate on subtle expressions than the small face CNN,
+        # which is exactly when we invoke it (gated on low face conf).
+        if vision_label in SAKINAH_15 and vision_conf >= 0.60:
+            scores = _vision_to_sakinah(vision) or {l: 0.0 for l in SAKINAH_15}
+            return {
+                "predicted": vision_label,
+                "confidence": vision_conf,
+                "scores": scores,
+                "sources_used": sources_used,
+                "fusion_strategy": "vision_override",
+                "face_predicted": face.get("predicted") if face and face.get("ok") else None,
+                "face_confidence": float(face.get("confidence", 0.0)) if face and face.get("ok") else 0.0,
+                "text_predicted": text.get("predicted") if text and text.get("ok") else None,
+                "text_confidence": float(text.get("confidence", 0.0)) if text and text.get("ok") else 0.0,
+                "vision_predicted": vision_label,
+                "vision_confidence": vision_conf,
+                "low_confidence": False,
+            }
+
     # Case 1 — no signals at all.
     if not face_proj and not text_proj:
         return {
@@ -143,6 +195,7 @@ def fuse(
             "fusion_strategy": "none",
             "face_predicted": None, "face_confidence": 0.0,
             "text_predicted": None, "text_confidence": 0.0,
+            "vision_predicted": None, "vision_confidence": 0.0,
             "low_confidence": True,
         }
 
@@ -157,6 +210,7 @@ def fuse(
             "face_predicted": face["predicted"],
             "face_confidence": float(face.get("confidence", face_conf)),
             "text_predicted": None, "text_confidence": 0.0,
+            "vision_predicted": vision_label, "vision_confidence": vision_conf,
             "low_confidence": face_conf < weak_confidence,
         }
     if text_proj and not face_proj:
@@ -169,6 +223,7 @@ def fuse(
             "face_predicted": None, "face_confidence": 0.0,
             "text_predicted": text["predicted"],
             "text_confidence": float(text.get("confidence", text_conf)),
+            "vision_predicted": vision_label, "vision_confidence": vision_conf,
             "low_confidence": text_conf < weak_confidence,
         }
 
@@ -196,6 +251,7 @@ def fuse(
             "face_confidence": float(face.get("confidence", face_conf)),
             "text_predicted": text.get("predicted"),
             "text_confidence": float(text.get("confidence", text_conf)),
+            "vision_predicted": vision_label, "vision_confidence": vision_conf,
             "low_confidence": False,
         }
 
@@ -222,5 +278,6 @@ def fuse(
         "face_confidence": raw_face_conf,
         "text_predicted": text.get("predicted"),
         "text_confidence": raw_text_conf,
+        "vision_predicted": vision_label, "vision_confidence": vision_conf,
         "low_confidence": low_conf,
     }
