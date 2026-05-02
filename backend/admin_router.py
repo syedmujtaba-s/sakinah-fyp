@@ -10,7 +10,7 @@ Admin endpoints for managing Seerah stories.
 import io
 import os
 from typing import Optional
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, field_validator
 from bson import ObjectId
@@ -18,17 +18,25 @@ from openpyxl import Workbook, load_workbook
 
 from database import stories_collection, story_index_collection
 from rag import sync_new_stories
+from auth import require_admin
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "story_template.xlsx")
 
-router = APIRouter(prefix="/api/admin", tags=["admin"])
+# Codex review (2026-05-02): the admin router was completely open to the
+# internet — anyone who reached the backend could create, update, or
+# delete the Seerah corpus. Putting `require_admin` on the router itself
+# (rather than per-endpoint) means every current AND future route under
+# /api/admin/* is gated by Firebase ID token + admin custom claim.
+router = APIRouter(
+    prefix="/api/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin)],
+)
 
-# --- Supported emotions (must match guidance_router) ---
-SUPPORTED_EMOTIONS = [
-    "happy", "sad", "anxious", "angry", "confused",
-    "grateful", "lonely", "stressed", "fearful", "guilty",
-    "hopeless", "overwhelmed", "rejected", "embarrassed", "lost"
-]
+# Imported from the central taxonomy. Codex caught that this list was
+# missing "neutral" while guidance_router accepted it — so a story
+# tagged neutral could never be uploaded through the admin path.
+from emotion.taxonomy import SAKINAH_EMOTIONS as SUPPORTED_EMOTIONS
 
 
 # ============================

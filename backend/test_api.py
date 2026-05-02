@@ -38,7 +38,34 @@ def test_get_emotions():
     assert "emotions" in data
     assert "anxious" in data["emotions"]
     assert "sad" in data["emotions"]
-    assert len(data["emotions"]) == 15
+    # Updated 2026-05-02: "neutral" was added as the 16th emotion so a
+    # calm/resting face has its own label. Codex caught the test asserting
+    # the old count.
+    assert "neutral" in data["emotions"]
+    assert len(data["emotions"]) == 16
+
+
+def test_admin_and_guidance_emotions_in_lockstep():
+    """Lockstep guard: admin upload and guidance must accept the same
+    emotion set. Codex caught one drifting from the other after the
+    neutral addition."""
+    from emotion.taxonomy import SAKINAH_EMOTIONS
+    from admin_router import SUPPORTED_EMOTIONS as ADMIN_EMOTIONS
+    from guidance_router import SUPPORTED_EMOTIONS as GUIDANCE_EMOTIONS
+    assert set(ADMIN_EMOTIONS) == set(SAKINAH_EMOTIONS)
+    assert set(GUIDANCE_EMOTIONS) == set(SAKINAH_EMOTIONS)
+
+
+def test_followup_crisis_detection_not_bypassed():
+    """Codex caught that follow-up requests (which send empty journal_entry)
+    bypassed crisis detection. The fix scans journal + followup +
+    previous_seerah_connection together."""
+    from guidance_router import _detect_crisis
+    # Empty journal entry, but the follow-up itself is the crisis signal.
+    # The router now passes the union of fields to _detect_crisis, so this
+    # ends up as the haystack `_detect_crisis` actually sees.
+    haystack = " ".join(["", "i want to kill myself can you help me", ""])
+    assert _detect_crisis(haystack, "hopeless") is True
 
 
 # ============================

@@ -2,8 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../auth/login.dart';
-// Import your home/main screen here
-// import '../screens/home_screen.dart';
+import 'home_main.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -78,15 +77,14 @@ class _SplashScreenState extends State<SplashScreen>
       
       if (!mounted) return;
 
+      // Codex review (2026-05-02): the previous version always sent the
+      // user to LoginPage even when authenticated, with a stale comment
+      // saying "remove this when home screen is ready". The home screen
+      // (HomeMain with the bottom nav) has been built for a while —
+      // wire it up properly so logged-in users skip the login round-trip.
       if (user != null) {
-        // User is logged in - go to home screen
-        // Uncomment and use your actual home screen
-        // _navigateToScreen(const HomeScreen());
-        
-        // For now, still go to login (remove this when home screen is ready)
-        _navigateToScreen(const LoginPage());
+        _navigateToScreen(const HomeMain());
       } else {
-        // User not logged in - go to login
         _navigateToScreen(const LoginPage());
       }
     } catch (e) {

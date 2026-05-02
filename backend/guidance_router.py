@@ -19,18 +19,10 @@ else:
     print("WARNING: GROQ_API_KEY not set. AI guidance will use fallback mode.")
 
 
-# --- Supported Emotions ---
-# 16 entries — "neutral" added 2026-04-27 so a calm/resting face has a
-# label of its own. When users come in with no strong emotion, the RAG
-# step (search_stories) won't find any "neutral"-tagged Seerah stories
-# in our corpus, but the fallback path in _dedupe_and_fetch returns the
-# best match anyway so the guidance flow stays unbroken.
-SUPPORTED_EMOTIONS = [
-    "happy", "sad", "anxious", "angry", "confused",
-    "grateful", "lonely", "stressed", "fearful", "guilty",
-    "hopeless", "overwhelmed", "rejected", "embarrassed", "lost",
-    "neutral",
-]
+# Imported from the central taxonomy. Codex caught that adding "neutral"
+# left admin_router.py validating against the old 15-emotion list while
+# this router accepted the new one — single source of truth fixes that.
+from emotion.taxonomy import SAKINAH_EMOTIONS as SUPPORTED_EMOTIONS
 
 # --- Crisis keywords — checked before RAG/Groq ---
 # Hard signals: any one of these flips the crisis flag regardless of mood.
@@ -141,7 +133,20 @@ async def get_guidance(request: GuidanceRequest):
     # Crisis check — before any RAG/LLM work. Pass the detected emotion so
     # the soft-signal tier can fire on muted-language distress when the
     # multi-modal pipeline already shows a hopeless/lost mood.
-    is_crisis = _detect_crisis(request.journal_entry, emotion)
+    #
+    # Codex review (2026-05-02) caught that the follow-up flow sends an
+    # empty `journal_entry` and the crisis check ran on that empty string —
+    # so a user asking a follow-up like "what's the point of all this"
+    # bypassed the helpline. We now scan the union of journal_entry +
+    # followup_question + previous_seerah_connection for crisis cues.
+    crisis_haystack = " ".join(
+        s for s in (
+            request.journal_entry,
+            request.followup_question or "",
+            request.previous_seerah_connection or "",
+        ) if s
+    )
+    is_crisis = _detect_crisis(crisis_haystack, emotion)
 
     # Follow-up mode: the user is asking a question about a previous guidance
     # session. Skip RAG (we re-use the previous story) and change the prompt.

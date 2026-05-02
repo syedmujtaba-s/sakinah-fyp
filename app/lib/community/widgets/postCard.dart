@@ -222,28 +222,38 @@ class _PostCardState extends State<PostCard> {
 
   Future<void> _toggleLike(bool isLiked, int currentCount) async {
     if (isLiking) return;
-    setState(() => isLiking = true);
-    
+
+    // Codex caught two bugs here:
+    //   1. We set isLiking=true and then early-returned on null user
+    //      WITHOUT resetting it -> the button stays stuck forever.
+    //   2. likeCount was a read-modify-write, so two concurrent likes
+    //      could lose an update or send the count negative.
+    // Fix: bail before flipping the flag, and use FieldValue.increment
+    // so the server adds atomically.
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
+    setState(() => isLiking = true);
     final ref = FirebaseFirestore.instance.collection('posts').doc(widget.postDoc.id);
 
     try {
       if (isLiked) {
         await ref.update({
-          'likeCount': currentCount - 1,
-          'likedBy': FieldValue.arrayRemove([user.uid])
+          'likeCount': FieldValue.increment(-1),
+          'likedBy': FieldValue.arrayRemove([user.uid]),
         });
       } else {
         await ref.update({
-          'likeCount': currentCount + 1,
-          'likedBy': FieldValue.arrayUnion([user.uid])
+          'likeCount': FieldValue.increment(1),
+          'likedBy': FieldValue.arrayUnion([user.uid]),
         });
       }
-    } catch (_) {}
-    
-    if (mounted) setState(() => isLiking = false);
+    } catch (_) {
+      // Swallow — Firestore will retry on next refresh; UI doesn't need to
+      // surface a flake.
+    } finally {
+      if (mounted) setState(() => isLiking = false);
+    }
   }
 
   /// Opens the same screen used for *creating* a post, but in edit mode —

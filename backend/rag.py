@@ -209,7 +209,10 @@ def search_stories(
     enriched_query = f"Emotion: {emotion}. {journal_entry}"
     query_embedding = embedder_encode(enriched_query)
 
-    print(f"Searching for emotion '{emotion}': {journal_entry[:80]}... (excluding {len(exclude_set)} stories)")
+    # Codex review (2026-05-02): don't log raw journal text — privacy promise
+    # to the user. Length + exclude count is enough to diagnose retrieval.
+    print(f"Searching for emotion '{emotion}' (text len={len(journal_entry)}, "
+          f"excluding {len(exclude_set)} stories)")
 
     # We fetch more chunks than needed since multiple chunks may be from the same story
     chunk_limit = limit * 4

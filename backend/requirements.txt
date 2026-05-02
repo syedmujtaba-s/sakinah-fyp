@@ -20,3 +20,10 @@ transformers
 torch
 # Image handling
 Pillow
+
+# ── Auth ───────────────────────────────────────────────
+# Verifies Firebase ID tokens on protected admin endpoints. The mobile/
+# admin-panel client sends `Authorization: Bearer <id_token>`; we
+# validate signature + admin custom claim before letting the request
+# through.
+firebase-admin

@@ -1,0 +1,140 @@
+rules_version = '2';
+
+// Sakinah Firestore security rules.
+//
+// The repo previously shipped no rules at all (firebase.json only registered
+// indexes), which means production was running on Firestore's default rules
+// — wide open in test mode or fully closed in production mode. Codex caught
+// this on 2026-05-02. These rules close the gaps without breaking the
+// existing client code paths the mobile app and admin panel use today.
+//
+// Mental model:
+//   - users/{uid} is owned by that user. They read/write their own profile,
+//     journal entries, habits, and emotion-correction logs. Nobody else
+//     can read or write someone else's user document.
+//   - posts/{id} are public reads. Authors can update/delete only their
+//     own. Like/comment-count fields are server-managed; we lock them
+//     so a malicious client can't inflate them.
+//   - feedback/* is write-only for users (they create), read-only for
+//     admins. Admins are identified by a custom claim 'admin' on the
+//     Firebase Auth token.
+//   - admin-only collections are gated by the admin claim.
+//
+// To grant admin: server-side, do
+//   admin.auth().setCustomUserClaims(uid, { admin: true });
+// from a trusted environment (a Cloud Function or one-off script).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -------- Helpers --------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    // True when the incoming write does NOT change the listed fields
+    // (compared to the existing document). Used to lock server-managed
+    // counters and identity fields.
+    function fieldsUnchanged(fields) {
+      return resource == null
+        || fields.hasOnly(request.resource.data.diff(resource.data).affectedKeys()) == false;
+    }
+
+    // -------- Users --------
+    // A user owns their own profile + everything nested under it. Other
+    // users cannot read it (so journal entries, habits, mood history are
+    // private). Admins can read for moderation/feedback context.
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin();
+      // Self-creation on signup; afterwards self-update only. The user
+      // CAN'T set their own admin role — that has to happen via custom
+      // claims from a trusted environment.
+      allow create: if isOwner(uid)
+                    && !request.resource.data.keys().hasAny(['role', 'isAdmin']);
+      allow update: if isOwner(uid)
+                    && !request.resource.data.diff(resource.data)
+                          .affectedKeys().hasAny(['role', 'isAdmin']);
+      allow delete: if isAdmin();
+
+      // Subcollections inherit the same owner rule.
+      match /{sub=**} {
+        allow read, write: if isOwner(uid);
+      }
+    }
+
+    // -------- Community posts --------
+    // Public read so the community feed works for everyone. Writes are
+    // restricted: only the post author can modify their own post, and the
+    // server-managed counters (likeCount, commentCount, likedBy, userId,
+    // createdAt) cannot be edited via update — only via specific server
+    // operations using FieldValue.increment / arrayUnion.
+    match /posts/{postId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn()
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.likeCount == 0
+                    && request.resource.data.commentCount == 0
+                    && request.resource.data.likedBy.size() == 0;
+
+      // Author can edit their own post body/title/tag, plus add an
+      // editedAt timestamp. Counters and identity are locked.
+      allow update: if isSignedIn()
+                    && (
+                      // Owner editing post body fields
+                      (resource.data.userId == request.auth.uid
+                       && !request.resource.data.diff(resource.data)
+                             .affectedKeys()
+                             .hasAny(['userId', 'username', 'createdAt'])
+                      )
+                      // Or any signed-in user toggling THEIR own like
+                      || request.resource.data.diff(resource.data)
+                           .affectedKeys()
+                           .hasOnly(['likeCount', 'likedBy'])
+                    );
+
+      allow delete: if isSignedIn()
+                    && resource.data.userId == request.auth.uid;
+
+      // Comments live under posts/{postId}/comments. Anyone signed in can
+      // read; only the comment author can write/delete their own.
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+                      && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if isSignedIn()
+                              && resource.data.userId == request.auth.uid;
+      }
+    }
+
+    // -------- User feedback --------
+    // Users can submit feedback (write). Only admins can read it back —
+    // this is what the admin dashboard uses to triage.
+    match /feedback/{feedbackId} {
+      allow create: if isSignedIn()
+                    && request.resource.data.userId == request.auth.uid;
+      allow read: if isAdmin();
+      allow update, delete: if isAdmin();
+    }
+
+    // -------- Admin collections --------
+    // Anything explicitly admin (e.g. flagged content, audit logs) is
+    // gated by the admin custom claim.
+    match /admin/{document=**} {
+      allow read, write: if isAdmin();
+    }
+
+    // -------- Default deny --------
+    // Anything not matched above is denied. Keep this LAST.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

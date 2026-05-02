@@ -31,16 +31,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-# Variable name kept as SAKINAH_15 for backward-compat (test_emotion.py
-# references it). Actual count is now 16 — "neutral" was added 2026-04-27
-# so a calm/resting face has somewhere to land instead of being shoved
-# into "confused".
-SAKINAH_15 = [
-    "happy", "sad", "anxious", "angry", "confused",
-    "grateful", "lonely", "stressed", "fearful", "guilty",
-    "hopeless", "overwhelmed", "rejected", "embarrassed", "lost",
-    "neutral",
-]
+# Imported from the central taxonomy so adding/removing an emotion is a
+# single-file change. Old name SAKINAH_15 kept as an alias because the
+# test suite (test_emotion.py) and helper functions still reference it.
+from emotion.taxonomy import SAKINAH_EMOTIONS as SAKINAH_15  # noqa: F401
 
 
 # AffectNet -> Sakinah-15 mapping. Each row is a probability distribution
@@ -200,7 +194,7 @@ def fuse(
         return {
             "predicted": "confused",
             "confidence": 0.0,
-            "scores": {l: 1.0 / 15 for l in SAKINAH_15},
+            "scores": {l: 1.0 / len(SAKINAH_15) for l in SAKINAH_15},
             "sources_used": [],
             "fusion_strategy": "none",
             "face_predicted": None, "face_confidence": 0.0,

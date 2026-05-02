@@ -50,8 +50,11 @@ class FaceEmotionService {
       form.fields.add(MapEntry('journal_text', journalText));
     }
 
+    // Codex review (2026-05-02): don't log the raw journal text — privacy
+    // promise to the user. Length is enough for diagnosing payload size.
     debugPrint('[FaceEmotion] POST $_baseUrl/api/emotion/detect '
-        '(image=${imageBytes?.length ?? 0}B, text="${journalText ?? ''}")');
+        '(image=${imageBytes?.length ?? 0}B, '
+        'text_len=${journalText?.length ?? 0})');
     try {
       final response = await _dio.post('/api/emotion/detect', data: form);
       // Print the full payload so we can diagnose what the model actually saw.

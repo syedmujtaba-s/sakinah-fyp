@@ -41,17 +41,9 @@ VISION_MODEL = os.getenv(
     "SAKINAH_VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct"
 )
 
-# The Sakinah-15 taxonomy. Must match SUPPORTED_EMOTIONS in
-# guidance_router.py and SAKINAH_15 in fusion.py — keep these three lists
-# in lockstep.
-# Mirror of the list in fusion.py — now 16 entries after adding "neutral".
-SAKINAH_15 = [
-    "happy", "sad", "anxious", "angry", "confused",
-    "grateful", "lonely", "stressed", "fearful", "guilty",
-    "hopeless", "overwhelmed", "rejected", "embarrassed", "lost",
-    "neutral",
-]
-_VALID = set(SAKINAH_15)
+# Imported from the central taxonomy so the three model-facing lists
+# (face fusion, vision LLM, admin validation) can never drift again.
+from emotion.taxonomy import SAKINAH_EMOTIONS as SAKINAH_15, SAKINAH_EMOTION_SET as _VALID
 
 # Ask the model for ONLY the label, no preamble. We strictly accept JSON
 # so we can parse without regex gymnastics — Groq's JSON mode guarantees

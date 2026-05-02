@@ -114,35 +114,3 @@ class _HomeMainState extends State<HomeMain> {
   }
 }
 
-// Simple Placeholder Screen for tabs we haven't built yet
-class PlaceholderScreen extends StatelessWidget {
-  final String title;
-  const PlaceholderScreen({super.key, required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: Text(title, style: const TextStyle(color: Color(0xFF15803D))),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        automaticallyImplyLeading: false, // Don't show back button
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.construction, size: 60, color: Colors.grey.shade300),
-            const SizedBox(height: 16),
-            Text(
-              "$title Coming Soon",
-              style: const TextStyle(color: Colors.grey, fontSize: 16),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
