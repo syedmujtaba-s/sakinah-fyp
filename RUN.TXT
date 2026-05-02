@@ -5,6 +5,18 @@ adb reverse tcp:8000 tcp:8000
 
 adb connect 192.168.1.103:41301 && adb devices
 
+# 1. Is backend listening?
+curl -s http://127.0.0.1:8000/api/emotion/health   # should return JSON
+
+# 2. Is the phone tunnel up?
+adb reverse --list                                 # should show: tcp:8000 tcp:8000
+
+# 3. If either is missing:
+adb reverse tcp:8000 tcp:8000
+cd "d:/merge fyp/sakinah/backend" && .venv/Scripts/activate
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+
 
 Backend:
 1. cd backend

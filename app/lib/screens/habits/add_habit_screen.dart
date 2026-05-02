@@ -273,15 +273,15 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
             // Color Picker
             const Text('Color', style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF374151))),
             const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.start,
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
               children: _colorOptions.map((hex) {
                 final selected = _selectedColor == hex;
                 final color = _parseColor(hex);
                 return GestureDetector(
                   onTap: () => setState(() => _selectedColor = hex),
                   child: Container(
-                    margin: const EdgeInsets.only(right: 12),
                     width: 36,
                     height: 36,
                     decoration: BoxDecoration(
