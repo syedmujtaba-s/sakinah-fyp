@@ -3,6 +3,14 @@
 Thumbs.db
 .idea/
 .vscode/
+.claude/
+
+# Build / output artifacts
+out/
+
+# Personal planning artifacts (kept in ~/.claude/plans/, not in repo)
+md_to_pdf.py
+Sakinah_*.pdf
 
 # Python / backend
 backend/.env
