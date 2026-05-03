@@ -1,0 +1,40 @@
+# Don't copy these into the Docker image — they bloat the layer and / or
+# leak local state into a public deployment.
+
+# Python virtual environments
+.venv/
+venv/
+env/
+
+# Python caches
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Local secrets — these come from Space env vars in production, never
+# from files baked into the image.
+.env
+.env.*
+serviceAccountKey.json
+*serviceAccount*.json
+
+# Test artifacts and dev-only files
+.coverage
+htmlcov/
+*.log
+
+# Editor / OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local-only datasets that are gitignored on the main repo too
+data/stories/moon split seerah_dataset ).jsonl
+validate_jsonl.py
+audit_dataset.py
+
+# Compiled debug screenshots
+*.png

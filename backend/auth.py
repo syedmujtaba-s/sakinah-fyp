@@ -53,6 +53,7 @@ def _init_firebase_admin() -> None:
         return
 
     try:
+        import json as _json
         import firebase_admin  # type: ignore
         from firebase_admin import credentials  # type: ignore
 
@@ -60,7 +61,22 @@ def _init_firebase_admin() -> None:
             _firebase_initialised = True
             return
 
-        # Try explicit env-var path first.
+        # Resolution order:
+        #   1. FIREBASE_SERVICE_ACCOUNT_JSON env var with the raw JSON
+        #      contents. This is the Hugging Face Spaces / Cloud Run /
+        #      Render path — secrets sit in env vars, not files.
+        #   2. GOOGLE_APPLICATION_CREDENTIALS env var pointing to a JSON
+        #      file on disk (Google's standard).
+        #   3. backend/serviceAccountKey.json — local development.
+        #   4. Application default credentials — works on GCP if
+        #      `gcloud auth application-default login` was run.
+        inline_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON")
+        if inline_json:
+            cred = credentials.Certificate(_json.loads(inline_json))
+            firebase_admin.initialize_app(cred)
+            _firebase_initialised = True
+            return
+
         cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         if not cred_path:
             local = os.path.join(
@@ -73,8 +89,6 @@ def _init_firebase_admin() -> None:
             cred = credentials.Certificate(cred_path)
             firebase_admin.initialize_app(cred)
         else:
-            # Application default credentials (works on GCP / Cloud Run /
-            # locally if `gcloud auth application-default login` was run).
             firebase_admin.initialize_app()
 
         _firebase_initialised = True
