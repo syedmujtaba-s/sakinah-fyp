@@ -217,16 +217,36 @@ async def upload_stories(file: UploadFile = File(...)):
 
 
 # ============================
-#  3. LIST ALL STORIES
+#  3. LIST STORIES (paginated)
 # ============================
 @router.get("/stories")
-async def list_stories():
-    """List all stories in the database."""
+async def list_stories(limit: int = 200, skip: int = 0):
+    """
+    List stories from the corpus with pagination.
+
+    The corpus has ~3,000 stories (~10 MB JSON if unpaginated), which
+    chokes the admin panel — Codex flagged this 2026-05-02. We default
+    to 200 per page; clients can request more by passing ?limit= up to
+    a sane cap.
+    """
+    limit = max(1, min(int(limit), 1000))
+    skip = max(0, int(skip))
+
+    cursor = stories_collection.find({}).sort("title", 1).skip(skip).limit(limit)
     stories = []
-    for s in stories_collection.find({}).sort("title", 1):
+    for s in cursor:
         s["_id"] = str(s["_id"])
         stories.append(s)
-    return {"count": len(stories), "stories": stories}
+
+    total = stories_collection.count_documents({})
+    return {
+        "count": len(stories),
+        "total": total,
+        "limit": limit,
+        "skip": skip,
+        "has_more": skip + len(stories) < total,
+        "stories": stories,
+    }
 
 
 @router.get("/stories/count")
