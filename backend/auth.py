@@ -144,15 +144,22 @@ def require_admin(
         from firebase_admin import auth as fb_auth  # type: ignore
         decoded = fb_auth.verify_id_token(id_token, check_revoked=False)
     except Exception as e:
+        # Verbose error so we can diagnose project-mismatch / expired /
+        # malformed-secret issues from the client without poking server
+        # logs. Safe to surface — these are auth diagnostics, not data.
+        msg = str(e) or repr(e)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid ID token: {type(e).__name__}",
+            detail=f"Invalid ID token: {type(e).__name__}: {msg[:200]}",
         )
 
     if not decoded.get("admin"):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin privilege required for this operation.",
+            detail=(
+                "Admin privilege required for this operation. "
+                f"Token claims present: {sorted(decoded.keys())[:8]}"
+            ),
         )
 
     return decoded
