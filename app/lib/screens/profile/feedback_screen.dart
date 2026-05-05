@@ -29,21 +29,30 @@ class _FeedbackScreenState extends State<FeedbackScreen> {
     
     try {
       final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        setState(() => _error = "Please sign in to send feedback.");
+        return;
+      }
       await FirebaseFirestore.instance.collection('feedback').add({
         'rating': _rating,
         'comment': _commentController.text.trim(),
-        'uid': user?.uid ?? '',
-        'email': user?.email ?? '',
+        // Field is named userId (not uid) to match the firestore.rules
+        // create-time check: request.resource.data.userId == request.auth.uid.
+        'userId': user.uid,
+        'email': user.email ?? '',
         'createdAt': FieldValue.serverTimestamp(),
       });
-      
+
       setState(() {
         _success = "Thank you for your feedback!";
         _commentController.clear();
         _rating = 0;
       });
     } catch (e) {
-      setState(() => _error = "Failed to send feedback. Try again.");
+      // Surface the underlying error so a permission-denied is visible
+      // during testing rather than a generic "try again". Codex flagged
+      // this swallow earlier.
+      setState(() => _error = "Failed to send feedback: $e");
     } finally {
       setState(() => _isSending = false);
     }
