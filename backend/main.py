@@ -34,11 +34,13 @@ app.add_middleware(
 from guidance_router import router as guidance_router
 from wisdom_router import router as wisdom_router
 from admin_router import router as admin_router
+from admin_management_router import router as admin_management_router
 from emotion_router import router as emotion_router
 
 app.include_router(guidance_router)
 app.include_router(wisdom_router)
 app.include_router(admin_router)
+app.include_router(admin_management_router)
 app.include_router(emotion_router)
 
 

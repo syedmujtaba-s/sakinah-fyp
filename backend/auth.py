@@ -165,6 +165,28 @@ def require_admin(
     return decoded
 
 
+def require_super_admin(
+    authorization: Optional[str] = Header(None),
+) -> dict:
+    """
+    Like require_admin, but ALSO requires the `superAdmin` custom claim.
+    Used to gate the in-panel admin-management endpoints — only super-
+    admins can grant or revoke the `admin` claim from the UI.
+
+    super_admin is a strict superset of admin: every super-admin must
+    also have admin: True (see grant_admin.py grant-super).
+    """
+    decoded = require_admin(authorization)  # reuses init + token verify
+
+    if not decoded.get("superAdmin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Super-admin privilege required for this operation.",
+        )
+
+    return decoded
+
+
 # Convenience: same idea but doesn't require the admin claim — verifies
 # the user is signed in. Future endpoints (e.g. user-scoped journal
 # history if we ever serve that from the backend) can use this.
