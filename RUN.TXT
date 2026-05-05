@@ -43,3 +43,69 @@ Notes:
 - Re-index backend stories later with:
   python -c "from rag import sync_new_stories; sync_new_stories()"
 - Do not commit backend/.env
+
+
+== WIRELESS ADB (when USB doesn't work) ==
+
+First-time pairing (do once per phone):
+  On the phone:
+    Settings -> About phone -> Software information
+      -> tap Build number 7 times to unlock developer mode
+    Settings -> Developer options -> Wireless debugging: ON
+    Tap "Wireless debugging" row -> "Pair device with pairing code"
+      -> note the PAIRING ip:port and 6-digit code
+    Back out -> note the CONNECTION ip:port (different port)
+
+  On the laptop:
+    adb kill-server
+    adb start-server
+    echo "<6-digit-code>" | adb pair <PAIRING_IP:PORT>
+    adb connect <CONNECTION_IP:PORT>
+    adb devices -l   # should show the phone
+
+Subsequent connects (after reboot / hotspot reconnect):
+  Pairing is permanent — only re-connect:
+    adb connect <CONNECTION_IP:PORT>     # check the phone's
+                                         # Wireless debugging page —
+                                         # the port can change after
+                                         # a reboot
+    adb devices
+
+Run the app over wireless ADB:
+    cd "D:\sakinah-fyp\app"
+    flutter run -d <CONNECTION_IP:PORT>
+
+
+== POINTING THE APP AT LOCAL vs DEPLOYED BACKEND ==
+
+app/lib/config/api_config.dart  ->  static const bool useDeployedBackend
+  true   -> hits https://sakinah-guidance-sakinah-backend.hf.space
+            (works on any phone with internet, no adb reverse needed)
+  false  -> hits the local laptop backend on http://localhost:8000
+            (needs uvicorn running + adb reverse tcp:8000 tcp:8000)
+
+sakinah-admin/lib/services/api_config.dart has the same flag.
+Hot RESTART (R, not r) is required after flipping the flag —
+const values aren't picked up by hot reload.
+
+
+== ADMIN PANEL (Flutter Web -> Firebase Hosting) ==
+
+Live URL:  https://sakinah-7390c.web.app
+
+Ship an update:
+    cd D:\sakinah-fyp\sakinah-admin
+    flutter build web --release
+    cd ..
+    firebase deploy --only hosting
+
+Notes:
+- Hosting config lives in repo-root firebase.json (alongside firestore
+  rules + indexes). Single config = single deploy command per concern.
+- Public dir = sakinah-admin/build/web. SPA rewrites send all routes
+  to /index.html so Flutter's router handles them.
+- Cache headers: assets cached 1 year (immutable), index.html no-cache.
+  So bumping the app and refreshing always shows the new build.
+- Firebase project: sakinah-7390c (see .firebaserc). Same project as
+  Auth + Firestore — the panel signs admins in via the existing user
+  pool with custom claim admin:true.
