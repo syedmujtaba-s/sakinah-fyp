@@ -86,6 +86,12 @@ service cloud.firestore {
 
       // Author can edit their own post body/title/tag, plus add an
       // editedAt timestamp. Counters and identity are locked.
+      // Two narrow exceptions for any signed-in user (not just owner):
+      //   - toggling their own like (likeCount + likedBy)
+      //   - bumping commentCount as part of a comment-create transaction
+      // These are write-only counter fields; they don't expose other-
+      // user data, and the corresponding subcollection write is gated
+      // separately by its own rule.
       allow update: if isSignedIn()
                     && (
                       // Owner editing post body fields
@@ -98,6 +104,11 @@ service cloud.firestore {
                       || request.resource.data.diff(resource.data)
                            .affectedKeys()
                            .hasOnly(['likeCount', 'likedBy'])
+                      // Or any signed-in user bumping commentCount as
+                      // part of a comment-create transaction
+                      || request.resource.data.diff(resource.data)
+                           .affectedKeys()
+                           .hasOnly(['commentCount'])
                     );
 
       allow delete: if isSignedIn()
