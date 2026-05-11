@@ -249,6 +249,67 @@ async def list_stories(limit: int = 200, skip: int = 0):
     }
 
 
+@router.get("/stories/search")
+async def search_stories_admin(
+    q: str = "",
+    limit: int = 200,
+    skip: int = 0,
+):
+    """
+    Case-insensitive substring search across story title / summary / period.
+
+    Used by the admin panel's search bar so admins don't have to scroll
+    through 2,938 paginated stories to find one. Empty `q` returns the
+    same shape as /stories so the frontend can treat both endpoints
+    interchangeably.
+
+    Matches are OR'd across title, summary, period. We escape regex
+    metacharacters in `q` so a search for "Mu'attib" doesn't blow up,
+    and `$options: "i"` keeps it case-insensitive.
+    """
+    import re
+
+    limit = max(1, min(int(limit), 1000))
+    skip = max(0, int(skip))
+    q_stripped = (q or "").strip()
+
+    if not q_stripped:
+        # No query -> same as /stories. Lets the panel keep one code path.
+        mongo_filter: dict = {}
+    else:
+        escaped = re.escape(q_stripped)
+        regex = {"$regex": escaped, "$options": "i"}
+        mongo_filter = {
+            "$or": [
+                {"title": regex},
+                {"summary": regex},
+                {"period": regex},
+            ]
+        }
+
+    cursor = (
+        stories_collection.find(mongo_filter)
+        .sort("title", 1)
+        .skip(skip)
+        .limit(limit)
+    )
+    stories = []
+    for s in cursor:
+        s["_id"] = str(s["_id"])
+        stories.append(s)
+
+    total = stories_collection.count_documents(mongo_filter)
+    return {
+        "count": len(stories),
+        "total": total,
+        "limit": limit,
+        "skip": skip,
+        "has_more": skip + len(stories) < total,
+        "query": q_stripped,
+        "stories": stories,
+    }
+
+
 @router.get("/stories/count")
 async def stories_count():
     """Return only the total story count — cheap for dashboards."""
