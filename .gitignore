@@ -14,6 +14,8 @@ out/
 # Personal planning artifacts (kept in ~/.claude/plans/, not in repo)
 md_to_pdf.py
 Sakinah_*.pdf
+viva-prep.pdf
+generate_viva_pdf.py
 
 # Python / backend
 backend/.env

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Sakinah brand colour used by the native launch splash so users
+         don't see a pure white screen while the Flutter engine boots in
+         release mode (can take 2-4s on low-end devices). -->
+    <color name="sakinah_splash_bg">#FFFFFF</color>
+    <color name="sakinah_splash_accent">#15803D</color>
 </resources>

@@ -1,18 +1,15 @@
-Sakinah v1.0.0 — first tester release.
+Sakinah v1.0.1 — hotfix release.
 
-This is the first build distributed via Firebase App Distribution.
+Fixed:
+- White screen on app launch after install. Two root causes addressed:
+  1. Native Android splash now shows Sakinah logo instead of pure white
+     while the Flutter engine boots (could take 2-4s on lower-end phones).
+  2. Firebase + notification service init now have hard timeouts (8s / 5s).
+     If either hangs on flaky network or missing Play Services, the app
+     still boots into the splash screen instead of staying blank forever.
 
-What's in:
-- Multi-modal emotion detection (face + journal text + vision LLM fallback)
-- Seerah-grounded guidance (RAG over 2,961 stories)
-- Community feed with likes + comments
-- Mood / habit / journal tracking
-- In-app feedback channel
-- Backend deployed at sakinah-guidance-sakinah-backend.hf.space
+If you had the previous v1.0.0 build that showed white screen — just
+update and reopen. You should now see the green Sakinah logo on launch.
 
-Known limitations:
-- Built with debug signing keys (Play Store publishing later)
-- Camera-based emotion detection requires camera permission
-
-If anything misbehaves, use the "Send Feedback" screen — it lands in
-the admin panel.
+Anything else weird, hit the "Send Feedback" screen and it'll show up
+in the admin panel.

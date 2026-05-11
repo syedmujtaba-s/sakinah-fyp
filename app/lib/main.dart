@@ -7,11 +7,31 @@ import 'services/notification_service.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  // Resilient startup: if Firebase or the notification plugin throws
+  // (e.g. offline first-launch, missing tz data on some Android
+  // versions, Google Play Services not installed), we MUST still call
+  // runApp — otherwise the user is stuck on a blank Android launch
+  // screen forever and thinks the install is broken. Errors here get
+  // logged but the app continues to boot.
+  try {
+    // Hard timeout: in release mode on a flaky network, Firebase init
+    // can hang silently for 30+ seconds — the user sees pure white and
+    // assumes the install is broken. 8s is plenty for the SDK to either
+    // succeed or report a failure; if it hasn't responded by then, give
+    // up and let the splash screen show.
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).timeout(const Duration(seconds: 8));
+  } catch (e, st) {
+    debugPrint('[main] Firebase init failed or timed out: $e\n$st');
+  }
 
-  await NotificationService.instance.init();
+  try {
+    await NotificationService.instance.init()
+        .timeout(const Duration(seconds: 5));
+  } catch (e, st) {
+    debugPrint('[main] NotificationService init failed: $e\n$st');
+  }
 
   runApp(const SakinahApp());
 }
