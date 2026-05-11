@@ -5,6 +5,9 @@ Thumbs.db
 .vscode/
 .claude/
 
+# Firebase CLI deploy cache (auto-generated, do not commit)
+.firebase/
+
 # Build / output artifacts
 out/
 

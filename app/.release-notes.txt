@@ -1,0 +1,18 @@
+Sakinah v1.0.0 — first tester release.
+
+This is the first build distributed via Firebase App Distribution.
+
+What's in:
+- Multi-modal emotion detection (face + journal text + vision LLM fallback)
+- Seerah-grounded guidance (RAG over 2,961 stories)
+- Community feed with likes + comments
+- Mood / habit / journal tracking
+- In-app feedback channel
+- Backend deployed at sakinah-guidance-sakinah-backend.hf.space
+
+Known limitations:
+- Built with debug signing keys (Play Store publishing later)
+- Camera-based emotion detection requires camera permission
+
+If anything misbehaves, use the "Send Feedback" screen — it lands in
+the admin panel.
