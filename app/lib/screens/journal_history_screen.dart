@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/guidance_service.dart';
+import '../services/notification_service.dart';
 import 'guidance_screen.dart';
 
 class JournalHistoryScreen extends StatelessWidget {
@@ -53,6 +54,9 @@ class JournalHistoryScreen extends StatelessWidget {
                   ? (data['guidance'] as Map<String, dynamic>?)
                   : null;
               return _JournalEntryCard(
+                entryId: docs[index].id,
+                uid: _uid,
+                storyId: savedGuidance?['story_id'] as String?,
                 text: data['text'] ?? '',
                 mood: data['mood'] ?? '',
                 createdAt: data['createdAt'] as Timestamp?,
@@ -106,12 +110,21 @@ class JournalHistoryScreen extends StatelessWidget {
 // ─── Expandable Journal Entry Card ───
 
 class _JournalEntryCard extends StatefulWidget {
+  final String entryId;
+  final String uid;
+  // Null when this entry has no saved guidance (hasGuidance == false).
+  // When null, the cascade-delete checkbox is hidden because there's
+  // nothing to cascade — no bookmarks or habits can be linked.
+  final String? storyId;
   final String text;
   final String mood;
   final Timestamp? createdAt;
   final Map<String, dynamic>? savedGuidance;
 
   const _JournalEntryCard({
+    required this.entryId,
+    required this.uid,
+    required this.storyId,
     required this.text,
     required this.mood,
     required this.createdAt,
@@ -192,6 +205,161 @@ class _JournalEntryCardState extends State<_JournalEntryCard> {
     );
   }
 
+  /// Two-step delete: confirmation dialog with an optional cascade
+  /// checkbox. When the checkbox is checked, we also delete every
+  /// bookmark and habit that references this entry's story (NOT just
+  /// this entry — see dialog wording). All deletes happen atomically
+  /// in a single Firestore WriteBatch so we don't end up half-deleted
+  /// if the network drops mid-cleanup.
+  Future<void> _confirmAndDelete() async {
+    bool cascade = false;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocalState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Delete this entry?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This will permanently remove this journal entry and its saved guidance.',
+                style: TextStyle(fontSize: 14, height: 1.4),
+              ),
+              if (widget.storyId != null && widget.storyId!.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                InkWell(
+                  onTap: () => setLocalState(() => cascade = !cascade),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Checkbox(
+                          value: cascade,
+                          activeColor: const Color(0xFF15803D),
+                          onChanged: (v) => setLocalState(() => cascade = v ?? false),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        const SizedBox(width: 4),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Also delete bookmarks and habits from this story',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                              ),
+                              SizedBox(height: 4),
+                              Text(
+                                'Saved items from this story will be removed — even if you saved them from a different journal entry that retrieved the same story.',
+                                style: TextStyle(fontSize: 11, color: Color(0xFF6B7280), height: 1.4),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red.shade700,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final firestore = FirebaseFirestore.instance;
+    final journalRef = firestore
+        .collection('users')
+        .doc(widget.uid)
+        .collection('journals')
+        .doc(widget.entryId);
+
+    int bookmarksRemoved = 0;
+    int habitsRemoved = 0;
+
+    try {
+      if (cascade &&
+          widget.storyId != null &&
+          widget.storyId!.isNotEmpty) {
+        final batch = firestore.batch();
+        batch.delete(journalRef);
+
+        // Bookmarks: filtered by storyId so we delete only this story's saves.
+        final bookmarks = await firestore
+            .collection('users')
+            .doc(widget.uid)
+            .collection('bookmarks')
+            .where('storyId', isEqualTo: widget.storyId)
+            .get();
+        for (final doc in bookmarks.docs) {
+          batch.delete(doc.reference);
+        }
+        bookmarksRemoved = bookmarks.docs.length;
+
+        // Habits: filtered by sourceStoryId.
+        final habits = await firestore
+            .collection('users')
+            .doc(widget.uid)
+            .collection('habits')
+            .where('sourceStoryId', isEqualTo: widget.storyId)
+            .get();
+        // Cancel scheduled local notifications for each habit before
+        // wiping them from Firestore — otherwise they'd fire pointing
+        // at a deleted doc.
+        for (final doc in habits.docs) {
+          await NotificationService.instance.cancelHabitReminder(doc.id);
+          batch.delete(doc.reference);
+        }
+        habitsRemoved = habits.docs.length;
+
+        await batch.commit();
+      } else {
+        // Simple path: just delete the journal doc. No batch needed.
+        await journalRef.delete();
+      }
+
+      if (!mounted) return;
+      final summary = cascade
+          ? 'Entry deleted. Also removed $bookmarksRemoved bookmark(s) and $habitsRemoved habit(s) from this story.'
+          : 'Entry deleted.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(summary),
+          backgroundColor: const Color(0xFF15803D),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Could not delete entry: $e'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    }
+  }
+
   Future<void> _getGuidanceAgain() async {
     setState(() => _isLoadingGuidance = true);
     try {
@@ -244,7 +412,7 @@ class _JournalEntryCardState extends State<_JournalEntryCard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header: mood tag + date
+            // Header: mood tag + date + actions menu
             Row(
               children: [
                 Container(
@@ -266,6 +434,29 @@ class _JournalEntryCardState extends State<_JournalEntryCard> {
                 Text(
                   _formatDate(widget.createdAt),
                   style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF)),
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Entry options',
+                  icon: const Icon(Icons.more_vert, size: 18, color: Color(0xFF9CA3AF)),
+                  padding: EdgeInsets.zero,
+                  // Stop tap-bubble so opening the menu doesn't also toggle
+                  // the card's expand/collapse state.
+                  onOpened: () {},
+                  onSelected: (value) {
+                    if (value == 'delete') _confirmAndDelete();
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem<String>(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                          SizedBox(width: 8),
+                          Text('Delete entry', style: TextStyle(color: Colors.red)),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),

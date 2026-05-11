@@ -66,6 +66,31 @@ class _JournalingScreenState extends State<JournalingScreen> {
 
       _hasFetchedGuidanceThisSession = true;
 
+      // Off-topic redirect path. Backend detected the text isn't an
+      // emotional reflection (e.g. "who is the PM of Pakistan?"). Don't
+      // pollute history with these — delete the placeholder doc we created
+      // up top, then show a friendly dialog with example prompts.
+      if (guidanceData['off_topic'] == true) {
+        if (journalRef != null) {
+          try {
+            await journalRef.delete();
+          } catch (_) {
+            // Best-effort cleanup; if it fails the entry just sits as a
+            // hasGuidance:false placeholder — user can delete it manually.
+          }
+        }
+        if (!mounted) return;
+        setState(() => _isProcessing = false);
+        await _showOffTopicDialog(
+          message: (guidanceData['redirect_message'] as String?) ??
+              'Sakinah is here for emotional reflection.',
+          suggestions: ((guidanceData['suggested_prompts'] as List?) ?? const [])
+              .map((e) => e.toString())
+              .toList(),
+        );
+        return;
+      }
+
       // Persist the full guidance response so it's revisitable from history.
       if (journalRef != null) {
         try {
@@ -118,6 +143,67 @@ class _JournalingScreenState extends State<JournalingScreen> {
         ),
       );
     }
+  }
+
+  /// Friendly redirect when the backend classifies the journal entry as
+  /// off-topic. Shows the message + a column of tappable example prompts;
+  /// tapping a prompt pre-fills the text field so the user can edit and
+  /// resubmit rather than starting from scratch.
+  Future<void> _showOffTopicDialog({
+    required String message,
+    required List<String> suggestions,
+  }) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text("Let's try that again"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message, style: const TextStyle(fontSize: 14, height: 1.4)),
+            if (suggestions.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'Try one of these:',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF6B7280)),
+              ),
+              const SizedBox(height: 8),
+              ...suggestions.map(
+                (s) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () {
+                      _journalController.text = s;
+                      _journalController.selection = TextSelection.fromPosition(
+                        TextPosition(offset: s.length),
+                      );
+                      Navigator.pop(ctx);
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF3F4F6),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(s, style: const TextStyle(fontSize: 13)),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override

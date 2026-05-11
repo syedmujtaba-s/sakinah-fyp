@@ -13,6 +13,22 @@ router = APIRouter(prefix="/api", tags=["guidance"])
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 
+# Fast, cheap model for the off-topic pre-flight classifier. We do NOT use
+# the same model as guidance (llama-3.3-70b) here — this check needs to be
+# sub-300ms so it doesn't bloat every guidance call. 8b-instant is plenty
+# for a yes/no decision.
+OFFTOPIC_MODEL = "llama-3.1-8b-instant"
+OFFTOPIC_REDIRECT_MESSAGE = (
+    "Sakinah is here for emotional reflection. Try sharing how you're "
+    "feeling — what's been on your heart today?"
+)
+OFFTOPIC_SUGGESTED_PROMPTS = [
+    "I've been feeling anxious about ...",
+    "I feel grateful for ...",
+    "I'm struggling with ...",
+    "Lately I've felt overwhelmed because ...",
+]
+
 if "gsk_" in GROQ_API_KEY:
     print("Groq API Key loaded!")
 else:
@@ -118,6 +134,89 @@ def _detect_crisis(text: str, emotion: str = "") -> bool:
     return False
 
 
+# In-process cache keyed by stripped+lowercased text. A user often submits
+# similar-looking entries while iterating; this avoids paying for the same
+# classifier call twice in a session. Cap is small — process restarts clear it.
+_OFFTOPIC_CACHE: dict[str, bool] = {}
+_OFFTOPIC_CACHE_CAP = 512
+
+
+async def _detect_off_topic(text: str) -> bool:
+    """
+    Fast Groq pre-flight that decides whether the journal entry is an
+    emotional reflection. Returns True if it looks off-topic (factual
+    questions, jokes, unrelated chat).
+
+    Guarantees:
+      - empty / very short text -> False (let RAG handle it)
+      - Groq failure -> False (fail-open — never block guidance because
+        the classifier is down)
+      - cache hit -> instant
+    """
+    stripped = (text or "").strip()
+    if len(stripped.split()) < 3:
+        return False
+
+    cache_key = stripped.lower()
+    if cache_key in _OFFTOPIC_CACHE:
+        return _OFFTOPIC_CACHE[cache_key]
+
+    if "gsk_" not in GROQ_API_KEY:
+        return False  # no key configured — can't classify, assume on-topic
+
+    prompt = (
+        "You are a strict classifier for an emotional wellness app where "
+        "users journal feelings. Decide: is the user's text below an "
+        "emotional reflection (yes) or off-topic — factual questions, "
+        "requests for information, jokes, code, or unrelated chat (no)? "
+        "Reply with ONLY the single word 'yes' or 'no'.\n\n"
+        f"Text: {stripped}"
+    )
+
+    is_offtopic = False
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            response = await client.post(
+                GROQ_URL,
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": OFFTOPIC_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.0,
+                    "max_tokens": 5,
+                },
+            )
+        if response.status_code == 200:
+            content = response.json()["choices"][0]["message"]["content"]
+            first_token = content.strip().lower().split()[0] if content.strip() else ""
+            # "no" / "off" / "off-topic" all signal off-topic.
+            is_offtopic = first_token.startswith("no") or first_token.startswith("off")
+    except Exception as e:
+        # Fail-open: a Groq outage must never block the guidance pipeline.
+        print(f"[off-topic] classifier failed, defaulting to on-topic: {e}")
+        is_offtopic = False
+
+    # Cap-and-evict — keep the cache bounded so it can't OOM a long-lived process.
+    if len(_OFFTOPIC_CACHE) >= _OFFTOPIC_CACHE_CAP:
+        _OFFTOPIC_CACHE.pop(next(iter(_OFFTOPIC_CACHE)))
+    _OFFTOPIC_CACHE[cache_key] = is_offtopic
+    return is_offtopic
+
+
+def _offtopic_response(emotion: str) -> dict:
+    """Structured payload the mobile app renders as the redirect dialog."""
+    return {
+        "off_topic": True,
+        "redirect_message": OFFTOPIC_REDIRECT_MESSAGE,
+        "suggested_prompts": OFFTOPIC_SUGGESTED_PROMPTS,
+        "emotion": emotion,
+        "crisis": False,
+    }
+
+
 # ============================
 #  1. GET GUIDANCE (CORE ENDPOINT)
 # ============================
@@ -155,6 +254,19 @@ async def get_guidance(request: GuidanceRequest):
         and request.followup_question.strip() != ""
         and request.previous_story_id is not None
     )
+
+    # Off-topic pre-flight. Ordering matters:
+    #   1. emotion validation (above) — fail-fast invalid emotions
+    #   2. crisis check (above) — safety-critical, never bypass
+    #   3. off-topic check (HERE) — only runs if no crisis AND not a follow-up
+    #   4. RAG (below)
+    # We do NOT run off-topic on follow-up requests because by definition
+    # the user is continuing a thread that was already on-topic. We also do
+    # NOT run it when is_crisis is True so a person typing "I want to die"
+    # never gets a redirect dialog — the helpline response wins.
+    if not is_crisis and not is_followup:
+        if await _detect_off_topic(request.journal_entry):
+            return _offtopic_response(emotion)
 
     if is_followup:
         # Fetch the specific story the user was previously shown
