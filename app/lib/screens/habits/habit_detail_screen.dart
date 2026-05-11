@@ -161,13 +161,29 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
   Widget build(BuildContext context) {
     final color = getHabitColor(widget.habitData['color'] ?? '#15803D');
     final icon = getHabitIcon(widget.habitData['icon'] ?? '');
-    final title = widget.habitData['title'] ?? 'Habit';
+    // Old habits saved the title as the first 42 chars of the advice with
+    // a trailing ellipsis, which surfaced as "...ot…" in the UI. New habits
+    // store the full advice. For old data, prefer sourceAdvice (the
+    // untruncated original) when it exists and the title looks truncated.
+    final rawTitle = (widget.habitData['title'] as String?) ?? 'Habit';
+    final sourceAdvice = (widget.habitData['sourceAdvice'] as String?) ?? '';
+    final title = (rawTitle.endsWith('…') || rawTitle.endsWith('...')) &&
+            sourceAdvice.isNotEmpty
+        ? sourceAdvice
+        : rawTitle;
     final category = widget.habitData['category'] ?? 'custom';
 
     return Scaffold(
       backgroundColor: const Color(0xFFFAFAFA),
       appBar: AppBar(
-        title: Text(title, style: const TextStyle(color: Color(0xFF15803D), fontWeight: FontWeight.bold)),
+        // AppBar titles are single-line by design; ellipsize cleanly.
+        // The card below shows the full title wrapped over multiple lines.
+        title: Text(
+          title,
+          style: const TextStyle(color: Color(0xFF15803D), fontWeight: FontWeight.bold),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         backgroundColor: Colors.white,
         elevation: 0,
         scrolledUnderElevation: 1,
@@ -223,8 +239,21 @@ class _HabitDetailScreenState extends State<HabitDetailScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1F2937))),
-                              const SizedBox(height: 4),
+                              // Full habit title — let it wrap to as many
+                              // lines as it needs. Slightly smaller font
+                              // (16 vs 18) keeps long advice readable in
+                              // the card without dominating the screen.
+                              Text(
+                                title,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1F2937),
+                                  height: 1.35,
+                                ),
+                                softWrap: true,
+                              ),
+                              const SizedBox(height: 6),
                               Text(
                                 category[0].toUpperCase() + category.substring(1),
                                 style: const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),

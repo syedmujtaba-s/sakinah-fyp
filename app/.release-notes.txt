@@ -1,21 +1,19 @@
-Sakinah v1.0.2 — UX polish + journal management.
+Sakinah v1.0.3 — habit title fix.
 
-What's new:
+Fixed:
+- Habit titles created from "Track this advice" were truncated to 42
+  characters with a literal "..." stored in the database, so the habit
+  detail screen showed something like "Reflect on how the Prophet's
+  smile made ot..." Now stores the full advice text and wraps it
+  cleanly across multiple lines on the detail screen.
 
-1. Off-topic detection
-   When you type something that isn't an emotional reflection (a factual
-   question, a code snippet, random chat), the app now gently redirects
-   you with example prompts instead of forcing a Seerah story onto your
-   non-emotional input. The bad entry is also NOT saved to your history.
+Behavior for old habits:
+- Existing habits with the truncated title automatically fall back to
+  showing the full text (sourceAdvice field). No data migration needed.
 
-2. Delete journal entries
-   Long-press / 3-dot menu on any journal in History → Delete. A
-   confirmation dialog gives you the option to also wipe bookmarks and
-   habits saved from that story (off by default — your saves are
-   protected unless you opt in).
+Carried over from v1.0.2:
+- Off-topic detector (factual questions, code etc. now show friendly
+  redirect instead of forcing a Seerah connection)
+- Delete journal entries with optional bookmarks/habits cascade
 
-3. Removed white-screen residue
-   v1.0.1's launch fix carries over: branded splash + resilient init.
-
-If anything feels off, hit the Send Feedback screen and it'll land in
-the admin panel.
+If anything looks off, hit Send Feedback and it'll reach the admin panel.

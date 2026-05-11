@@ -184,8 +184,13 @@ class _GuidanceScreenState extends State<GuidanceScreen> {
     final shortSlug = adviceSlug.length > 40 ? adviceSlug.substring(0, 40) : adviceSlug;
     final docId = 'advice_${_slug(storyTitle)}_$shortSlug';
 
-    // Habit title: first ~40 chars of the advice, trailing ellipsis if cut.
-    final habitTitle = advice.length > 45 ? '${advice.substring(0, 42).trim()}…' : advice;
+    // Habit title: use the full advice text. We used to truncate to 42 chars
+    // with a trailing ellipsis (which then appeared verbatim as "ot…" in the
+    // habit detail screen), but the UI handles long titles fine — and storing
+    // the full text means the detail screen can display the complete advice
+    // without falling back to sourceAdvice. Older habits with truncated
+    // titles still display via the sourceAdvice fallback in habit_detail_screen.
+    final habitTitle = advice;
 
     try {
       await FirebaseFirestore.instance

@@ -30,6 +30,8 @@ backend/*.pyc
 # Local-only backend files (not checked in)
 backend/validate_jsonl.py
 backend/data/stories/moon split seerah_dataset ).jsonl
+backend/test_offtopic_battery.py
+backend/test_exclude_story_e2e.py
 
 # Flutter / generated
 app/.dart_tool/
