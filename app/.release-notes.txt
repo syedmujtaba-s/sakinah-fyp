@@ -1,49 +1,31 @@
-Sakinah v1.0.4 — notifications & reminders reliability fix.
-
-Fixed (the "my reminders don't work" cluster):
-
-1. Notification small-icon is now a proper white silhouette (heart).
-   Previously the launcher icon was used, which Android renders as a
-   white square. Now notifications look like Sakinah notifications.
-
-2. Reminders fire on time even overnight. The scheduling mode changed
-   from inexact to exactAllowWhileIdle so Doze mode doesn't delay them.
-   Falls back to inexact mode if exact-alarm permission isn't granted
-   on Android 12+ devices.
-
-3. ScheduledNotificationReceiver explicitly declared in AndroidManifest
-   as a safety net in case manifest merger ever drops it.
-
-4. Reminder toggles now reflect reality:
-   - Toggle ON only flips after scheduling actually succeeds.
-   - If scheduling fails (denied permission, plugin error), the toggle
-     stays OFF and you get a clear error snackbar instead of silently
-     thinking it worked.
-
-5. Habit reminders honour permission denial. Previously a habit with
-   "Reminder: 8 PM" could be saved even when notifications were denied
-   — the habit would appear in your list with the time visible but no
-   notification ever fired. Now the habit saves without a reminder and
-   tells you to enable notifications first.
-
-6. NotificationService self-bootstraps. Schedule/cancel calls work even
-   if main.dart's init failed silently (e.g. on a flaky first launch).
-
-7. Notification channel explicitly created on Android 8+ with the right
-   importance, so Samsung One UI devices don't drop reminders to a
-   low-priority channel that never appears in the status bar.
+Sakinah v1.0.5 — fully customisable reminders.
 
 New:
 
-8. "Send test notification now" button at the bottom of the Reminders
-   screen. Fires a notification immediately so you can verify the whole
-   stack works without waiting for 8 PM.
+1. Tap the time chip on any reminder (Journal Reflection, Morning Adhkar,
+   Evening Adhkar, Habit Check-in) to pick your own time. Native Android
+   time picker, supports both 12/24-hour formats.
 
-Other:
-- Carries v1.0.3's habit title fix and v1.0.2's off-topic detector.
+2. Per-day-of-week control. Each reminder shows seven small chips
+   (M T W T F S S). Tap to toggle that day on or off — e.g. skip Friday,
+   or run a habit reminder only on weekends. At least one day must stay
+   selected.
 
-If a reminder you set still doesn't fire after this update:
-- Open the new Reminders screen and tap "Send test notification now"
-  to verify the basics.
-- If even the test doesn't fire, your device's "Alarms & reminders"
-  permission is blocked. Open app settings → Permissions → enable.
+3. Both time and day preferences sync to your account so they survive
+   reinstalls and follow you to a new device.
+
+How it works:
+- Time chip → tap → pick → notification re-schedules immediately.
+- Day chip → tap → that day's alarm is added or cancelled. Other days
+  are unaffected (so you can change days without losing the reminder
+  on the rest of the week).
+- Defaults still 8 PM / 6 AM / 5 PM / 9 PM (every day) if you don't
+  customise.
+
+Carries forward:
+- v1.0.4 notification reliability fixes (icon, exact alarms, channel,
+  permission handling, test button).
+
+Existing users upgrading from v1.0.4: your old daily-style alarms are
+automatically cancelled on first launch of v1.0.5 — no duplicate
+notifications.

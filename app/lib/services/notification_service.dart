@@ -48,14 +48,37 @@ class NotificationService {
   static const String _channelDescription =
       'Seerah-themed daily spiritual reminders';
 
-  // Stable IDs for each reminder type
-  static const int journalReminderId = 1001;
-  static const int morningAdhkarId = 1002;
-  static const int eveningAdhkarId = 1003;
-  static const int habitCheckinId = 1004;
+  // Stable IDs for each reminder type.
+  //
+  // Each of the four built-in reminders owns 7 consecutive IDs (one per
+  // ISO weekday: 1=Mon..7=Sun). We need separate alarm IDs per day so
+  // the user can disable e.g. Saturday without cancelling Sunday too.
+  // Base + isoWeekday gives the actual ID. Ranges below are reserved:
+  //   Journal:       1011..1017
+  //   Morning Adhkar: 1021..1027
+  //   Evening Adhkar: 1031..1037
+  //   Habit Check-in: 1041..1047
+  // These ranges sit comfortably between the legacy single IDs (1001..1004,
+  // cancelled at init for v1.0.4 upgraders) and the per-habit hashed range
+  // (10000+).
+  static const int journalReminderBase = 1010;
+  static const int morningAdhkarBase = 1020;
+  static const int eveningAdhkarBase = 1030;
+  static const int habitCheckinBase = 1040;
+
+  // Legacy single-shot IDs from v1.0.4 — kept here only so init() can
+  // cancel them defensively when a user upgrades, preventing duplicate
+  // notifications (old daily alarm + new weekly alarms firing together).
+  static const int _legacyJournalId = 1001;
+  static const int _legacyMorningId = 1002;
+  static const int _legacyEveningId = 1003;
+  static const int _legacyHabitCheckinId = 1004;
+
   // Reserved range start for the "Send test notification now" button
   // so it never collides with a real reminder ID.
   static const int testNotificationId = 999;
+
+  int _idForDay(int base, int isoWeekday) => base + isoWeekday; // 1..7
 
   bool get isInitialized => _initialized;
   bool get initFailed => _initFailed;
@@ -122,6 +145,18 @@ class NotificationService {
       }
 
       _initialized = true;
+
+      // Defensive cleanup for users upgrading from v1.0.4 or earlier. Their
+      // device still has scheduled alarms under the legacy single IDs; if
+      // we don't cancel them, those alarms continue to fire AND the new
+      // per-day weekly alarms fire — user gets two notifications per
+      // reminder. Cheap to run (just calls cancel for 4 IDs that may or
+      // may not exist).
+      try {
+        await _cancelLegacyReminders();
+      } catch (e) {
+        debugPrint('[NotificationService] legacy cleanup failed (non-fatal): $e');
+      }
     } catch (e, st) {
       _initFailed = true;
       _lastInitError = e.toString();
@@ -308,43 +343,198 @@ class NotificationService {
     return messages[dayOfYear % messages.length];
   }
 
-  Future<bool> scheduleJournalReminder() async {
-    return scheduleDailyNotification(
-      id: journalReminderId,
+  /// Schedule a built-in reminder on each enabled day at the given time.
+  ///
+  /// Cancels all 7 day-slots first so that removed days don't keep firing,
+  /// then schedules a weekly-repeat alarm for each day in [days]. Returns
+  /// true only if EVERY day-slot scheduled successfully.
+  Future<bool> _scheduleBuiltInReminder({
+    required int base,
+    required String title,
+    required String body,
+    required int hour,
+    required int minute,
+    required List<int> days,
+  }) async {
+    if (!await _ensureInit()) return false;
+    await cancelReminderAllDays(base);
+    bool allOk = true;
+    for (final d in days) {
+      if (d < 1 || d > 7) continue;
+      allOk &= await _scheduleWeeklyDay(
+        id: _idForDay(base, d),
+        title: title,
+        body: body,
+        hour: hour,
+        minute: minute,
+        isoWeekday: d,
+      );
+    }
+    return allOk;
+  }
+
+  /// Schedule one notification that repeats weekly on a single weekday at
+  /// the given hour:minute. Mirrors [scheduleDailyNotification] but uses
+  /// [DateTimeComponents.dayOfWeekAndTime] for weekly repeats.
+  Future<bool> _scheduleWeeklyDay({
+    required int id,
+    required String title,
+    required String body,
+    required int hour,
+    required int minute,
+    required int isoWeekday, // 1..7 (Mon..Sun) — Dart's DateTime.weekday
+  }) async {
+    if (!await _ensureInit()) return false;
+
+    final now = tz.TZDateTime.now(tz.local);
+    var scheduled =
+        tz.TZDateTime(tz.local, now.year, now.month, now.day, hour, minute);
+    // Roll forward day by day until we hit the target weekday AND the
+    // computed time is in the future. Worst case 7 iterations.
+    while (scheduled.weekday != isoWeekday || scheduled.isBefore(now)) {
+      scheduled = scheduled.add(const Duration(days: 1));
+    }
+
+    const androidDetails = AndroidNotificationDetails(
+      _channelId,
+      _channelName,
+      channelDescription: _channelDescription,
+      importance: Importance.high,
+      priority: Priority.high,
+      icon: '@drawable/ic_stat_notify',
+      color: _brandColor,
+    );
+    const details = NotificationDetails(
+      android: androidDetails,
+      iOS: DarwinNotificationDetails(),
+    );
+
+    // Exact first, fall back to inexact if exact-alarm permission denied.
+    try {
+      await _plugin.zonedSchedule(
+        id,
+        title,
+        body,
+        scheduled,
+        details,
+        uiLocalNotificationDateInterpretation:
+            UILocalNotificationDateInterpretation.absoluteTime,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+      );
+      return true;
+    } catch (e) {
+      debugPrint(
+          '[NotificationService] weekly exact failed ($e), retrying inexact');
+      try {
+        await _plugin.zonedSchedule(
+          id,
+          title,
+          body,
+          scheduled,
+          details,
+          uiLocalNotificationDateInterpretation:
+              UILocalNotificationDateInterpretation.absoluteTime,
+          androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+          matchDateTimeComponents: DateTimeComponents.dayOfWeekAndTime,
+        );
+        return true;
+      } catch (e2) {
+        debugPrint(
+            '[NotificationService] weekly inexact also failed: $e2');
+        return false;
+      }
+    }
+  }
+
+  /// Cancel every day-slot for one of the built-in reminders. Used by the
+  /// Reminders screen when the user changes the time (cancel-all then
+  /// reschedule-enabled) or toggles the reminder off.
+  Future<void> cancelReminderAllDays(int base) async {
+    if (!await _ensureInit()) return;
+    for (int d = 1; d <= 7; d++) {
+      try {
+        await _plugin.cancel(_idForDay(base, d));
+      } catch (e) {
+        debugPrint(
+            '[NotificationService] cancel ${_idForDay(base, d)} failed: $e');
+      }
+    }
+  }
+
+  /// One-time cleanup of v1.0.4-era single-shot alarm IDs. Called from
+  /// init() so a user upgrading from v1.0.4 doesn't get duplicate
+  /// notifications (old daily alarm + new weekly alarms firing together).
+  Future<void> _cancelLegacyReminders() async {
+    for (final id in const [
+      _legacyJournalId,
+      _legacyMorningId,
+      _legacyEveningId,
+      _legacyHabitCheckinId,
+    ]) {
+      try {
+        await _plugin.cancel(id);
+      } catch (_) {/* nothing to cancel = success */}
+    }
+  }
+
+  Future<bool> scheduleJournalReminder({
+    int hour = 20,
+    int minute = 0,
+    List<int> days = const [1, 2, 3, 4, 5, 6, 7],
+  }) async {
+    return _scheduleBuiltInReminder(
+      base: journalReminderBase,
       title: 'Journal Reflection',
       body: _rotatingMessage(_journalMessages),
-      hour: 20,
-      minute: 0,
+      hour: hour,
+      minute: minute,
+      days: days,
     );
   }
 
-  Future<bool> scheduleMorningAdhkar() async {
-    return scheduleDailyNotification(
-      id: morningAdhkarId,
+  Future<bool> scheduleMorningAdhkar({
+    int hour = 6,
+    int minute = 0,
+    List<int> days = const [1, 2, 3, 4, 5, 6, 7],
+  }) async {
+    return _scheduleBuiltInReminder(
+      base: morningAdhkarBase,
       title: 'Morning Adhkar',
       body: _rotatingMessage(_morningAdhkarMessages),
-      hour: 6,
-      minute: 0,
+      hour: hour,
+      minute: minute,
+      days: days,
     );
   }
 
-  Future<bool> scheduleEveningAdhkar() async {
-    return scheduleDailyNotification(
-      id: eveningAdhkarId,
+  Future<bool> scheduleEveningAdhkar({
+    int hour = 17,
+    int minute = 0,
+    List<int> days = const [1, 2, 3, 4, 5, 6, 7],
+  }) async {
+    return _scheduleBuiltInReminder(
+      base: eveningAdhkarBase,
       title: 'Evening Adhkar',
       body: _rotatingMessage(_eveningAdhkarMessages),
-      hour: 17,
-      minute: 0,
+      hour: hour,
+      minute: minute,
+      days: days,
     );
   }
 
-  Future<bool> scheduleHabitCheckin() async {
-    return scheduleDailyNotification(
-      id: habitCheckinId,
+  Future<bool> scheduleHabitCheckin({
+    int hour = 21,
+    int minute = 0,
+    List<int> days = const [1, 2, 3, 4, 5, 6, 7],
+  }) async {
+    return _scheduleBuiltInReminder(
+      base: habitCheckinBase,
       title: 'Habit Check-in',
       body: _rotatingMessage(_habitMessages),
-      hour: 21,
-      minute: 0,
+      hour: hour,
+      minute: minute,
+      days: days,
     );
   }
 

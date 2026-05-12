@@ -22,6 +22,22 @@ class _RemindersScreenState extends State<RemindersScreen> {
   bool _habitCheckin = false;
   bool _loading = true;
 
+  // Per-reminder user-configurable time. Seeded with the same defaults
+  // the developer originally hardcoded (8 PM / 6 AM / 5 PM / 9 PM), but
+  // any user customisation in users/{uid}/settings/reminders overrides
+  // these in _loadSettings.
+  TimeOfDay _journalTime = const TimeOfDay(hour: 20, minute: 0);
+  TimeOfDay _morningTime = const TimeOfDay(hour: 6, minute: 0);
+  TimeOfDay _eveningTime = const TimeOfDay(hour: 17, minute: 0);
+  TimeOfDay _habitCheckinTime = const TimeOfDay(hour: 21, minute: 0);
+
+  // Days each reminder fires on. ISO weekday convention: 1=Mon..7=Sun.
+  // Default is all 7 (matches the daily behaviour from v1.0.4).
+  Set<int> _journalDays = {1, 2, 3, 4, 5, 6, 7};
+  Set<int> _morningDays = {1, 2, 3, 4, 5, 6, 7};
+  Set<int> _eveningDays = {1, 2, 3, 4, 5, 6, 7};
+  Set<int> _habitCheckinDays = {1, 2, 3, 4, 5, 6, 7};
+
   // Daily wisdom data
   Map<String, dynamic>? _wisdom;
 
@@ -55,6 +71,45 @@ class _RemindersScreenState extends State<RemindersScreen> {
           _morningAdhkar = data['morningAdhkar'] ?? false;
           _eveningAdhkar = data['eveningAdhkar'] ?? false;
           _habitCheckin = data['habitCheckin'] ?? false;
+
+          // Per-reminder custom time + days. Missing fields fall back to
+          // the developer defaults (the previously-hardcoded times).
+          _journalTime = TimeOfDay(
+            hour: (data['journalHour'] as int?) ?? 20,
+            minute: (data['journalMinute'] as int?) ?? 0,
+          );
+          _journalDays = ((data['journalDays'] as List?)
+                  ?.map((e) => (e as num).toInt())
+                  .toSet()) ??
+              {1, 2, 3, 4, 5, 6, 7};
+
+          _morningTime = TimeOfDay(
+            hour: (data['morningHour'] as int?) ?? 6,
+            minute: (data['morningMinute'] as int?) ?? 0,
+          );
+          _morningDays = ((data['morningDays'] as List?)
+                  ?.map((e) => (e as num).toInt())
+                  .toSet()) ??
+              {1, 2, 3, 4, 5, 6, 7};
+
+          _eveningTime = TimeOfDay(
+            hour: (data['eveningHour'] as int?) ?? 17,
+            minute: (data['eveningMinute'] as int?) ?? 0,
+          );
+          _eveningDays = ((data['eveningDays'] as List?)
+                  ?.map((e) => (e as num).toInt())
+                  .toSet()) ??
+              {1, 2, 3, 4, 5, 6, 7};
+
+          _habitCheckinTime = TimeOfDay(
+            hour: (data['habitCheckinHour'] as int?) ?? 21,
+            minute: (data['habitCheckinMinute'] as int?) ?? 0,
+          );
+          _habitCheckinDays = ((data['habitCheckinDays'] as List?)
+                  ?.map((e) => (e as num).toInt())
+                  .toSet()) ??
+              {1, 2, 3, 4, 5, 6, 7};
+
           _loading = false;
         });
         // Sync notifications to match Firestore state. Wrapped + awaited
@@ -92,29 +147,47 @@ class _RemindersScreenState extends State<RemindersScreen> {
   }
 
   /// Re-schedule or cancel notifications to match current toggle states.
+  /// Each reminder is per-day-of-week now, so the cancel path uses
+  /// cancelReminderAllDays() to clear all 7 day-slots in one go.
   /// Returns true if all schedule/cancel operations succeeded.
   Future<bool> _syncNotifications() async {
     final ns = NotificationService.instance;
     bool allOk = true;
     if (_journalReminder) {
-      allOk &= await ns.scheduleJournalReminder();
+      allOk &= await ns.scheduleJournalReminder(
+        hour: _journalTime.hour,
+        minute: _journalTime.minute,
+        days: _journalDays.toList()..sort(),
+      );
     } else {
-      await ns.cancelNotification(NotificationService.journalReminderId);
+      await ns.cancelReminderAllDays(NotificationService.journalReminderBase);
     }
     if (_morningAdhkar) {
-      allOk &= await ns.scheduleMorningAdhkar();
+      allOk &= await ns.scheduleMorningAdhkar(
+        hour: _morningTime.hour,
+        minute: _morningTime.minute,
+        days: _morningDays.toList()..sort(),
+      );
     } else {
-      await ns.cancelNotification(NotificationService.morningAdhkarId);
+      await ns.cancelReminderAllDays(NotificationService.morningAdhkarBase);
     }
     if (_eveningAdhkar) {
-      allOk &= await ns.scheduleEveningAdhkar();
+      allOk &= await ns.scheduleEveningAdhkar(
+        hour: _eveningTime.hour,
+        minute: _eveningTime.minute,
+        days: _eveningDays.toList()..sort(),
+      );
     } else {
-      await ns.cancelNotification(NotificationService.eveningAdhkarId);
+      await ns.cancelReminderAllDays(NotificationService.eveningAdhkarBase);
     }
     if (_habitCheckin) {
-      allOk &= await ns.scheduleHabitCheckin();
+      allOk &= await ns.scheduleHabitCheckin(
+        hour: _habitCheckinTime.hour,
+        minute: _habitCheckinTime.minute,
+        days: _habitCheckinDays.toList()..sort(),
+      );
     } else {
-      await ns.cancelNotification(NotificationService.habitCheckinId);
+      await ns.cancelReminderAllDays(NotificationService.habitCheckinBase);
     }
     return allOk;
   }
@@ -137,10 +210,13 @@ class _RemindersScreenState extends State<RemindersScreen> {
   /// scheduling succeeds, and OFF after cancel returns. If anything fails
   /// the toggle stays in its previous position and we show an explicit
   /// snackbar — no more "switch says ON but no notification ever fires".
+  ///
+  /// [reminderBase] is the per-day-base ID (e.g. journalReminderBase).
+  /// Cancel path wipes all 7 day-slots in one call.
   Future<void> _handleToggle({
     required bool newValue,
     required Future<bool> Function() schedule,
-    required int notificationId,
+    required int reminderBase,
     required void Function(bool) updateState,
   }) async {
     if (newValue) {
@@ -162,11 +238,85 @@ class _RemindersScreenState extends State<RemindersScreen> {
       }
       setState(() => updateState(true));
     } else {
-      await NotificationService.instance.cancelNotification(notificationId);
+      await NotificationService.instance.cancelReminderAllDays(reminderBase);
       if (!mounted) return;
       setState(() => updateState(false));
     }
     await _saveSettings();
+  }
+
+  /// Open the native time picker, save the new time, and reschedule all
+  /// enabled days at the new time if the reminder is currently ON.
+  Future<void> _pickTime({
+    required TimeOfDay current,
+    required ValueChanged<TimeOfDay> onPicked,
+    required bool reminderEnabled,
+    required Future<bool> Function() reschedule,
+    required int reminderBase,
+  }) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: current,
+    );
+    if (picked == null || !mounted) return;
+    setState(() => onPicked(picked));
+    await _saveSettings();
+    if (reminderEnabled) {
+      // Cancel-then-reschedule. The schedule method already cancels-all
+      // internally as a defensive first step, but we cancel explicitly
+      // here so any half-replaced state from a previous failure is gone.
+      await NotificationService.instance.cancelReminderAllDays(reminderBase);
+      final ok = await reschedule();
+      if (!mounted) return;
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not reschedule reminder.'),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+        return;
+      }
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Reminder updated to ${picked.format(context)}'),
+        backgroundColor: const Color(0xFF15803D),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
+  /// Toggle a single weekday in the set, persist, and reschedule. Refuses
+  /// to disable the last enabled day — the user must always have at least
+  /// one day selected (otherwise the reminder is effectively orphaned).
+  Future<void> _toggleDay({
+    required Set<int> days,
+    required int weekday, // 1..7
+    required ValueChanged<Set<int>> onUpdated,
+    required bool reminderEnabled,
+    required Future<bool> Function() reschedule,
+    required int reminderBase,
+  }) async {
+    final next = Set<int>.from(days);
+    if (next.contains(weekday)) {
+      if (next.length == 1) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Pick at least one day.')),
+        );
+        return;
+      }
+      next.remove(weekday);
+    } else {
+      next.add(weekday);
+    }
+    setState(() => onUpdated(next));
+    await _saveSettings();
+    if (reminderEnabled) {
+      await NotificationService.instance.cancelReminderAllDays(reminderBase);
+      await reschedule();
+    }
   }
 
   /// Persist toggle state to Firestore. Surfaces save errors via snackbar
@@ -180,10 +330,25 @@ class _RemindersScreenState extends State<RemindersScreen> {
           .collection('settings')
           .doc('reminders')
           .set({
+        // Toggles
         'journalReminder': _journalReminder,
         'morningAdhkar': _morningAdhkar,
         'eveningAdhkar': _eveningAdhkar,
         'habitCheckin': _habitCheckin,
+        // Times
+        'journalHour': _journalTime.hour,
+        'journalMinute': _journalTime.minute,
+        'morningHour': _morningTime.hour,
+        'morningMinute': _morningTime.minute,
+        'eveningHour': _eveningTime.hour,
+        'eveningMinute': _eveningTime.minute,
+        'habitCheckinHour': _habitCheckinTime.hour,
+        'habitCheckinMinute': _habitCheckinTime.minute,
+        // Days (sorted for predictable Firestore storage order)
+        'journalDays': _journalDays.toList()..sort(),
+        'morningDays': _morningDays.toList()..sort(),
+        'eveningDays': _eveningDays.toList()..sort(),
+        'habitCheckinDays': _habitCheckinDays.toList()..sort(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
     } catch (e) {
@@ -368,49 +533,165 @@ class _RemindersScreenState extends State<RemindersScreen> {
                   _buildReminderTile(
                     icon: Icons.edit_note_rounded,
                     title: 'Journal Reflection',
-                    subtitle: 'Daily reminder to reflect and write (8:00 PM)',
+                    subtitle: 'Daily reminder to reflect and write',
                     value: _journalReminder,
+                    time: _journalTime,
+                    days: _journalDays,
                     onChanged: (v) => _handleToggle(
                       newValue: v,
-                      schedule: NotificationService.instance.scheduleJournalReminder,
-                      notificationId: NotificationService.journalReminderId,
+                      schedule: () => NotificationService.instance.scheduleJournalReminder(
+                        hour: _journalTime.hour,
+                        minute: _journalTime.minute,
+                        days: _journalDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.journalReminderBase,
                       updateState: (val) => _journalReminder = val,
+                    ),
+                    onTimeTap: () => _pickTime(
+                      current: _journalTime,
+                      onPicked: (t) => _journalTime = t,
+                      reminderEnabled: _journalReminder,
+                      reschedule: () => NotificationService.instance.scheduleJournalReminder(
+                        hour: _journalTime.hour,
+                        minute: _journalTime.minute,
+                        days: _journalDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.journalReminderBase,
+                    ),
+                    onDayTap: (weekday) => _toggleDay(
+                      days: _journalDays,
+                      weekday: weekday,
+                      onUpdated: (s) => _journalDays = s,
+                      reminderEnabled: _journalReminder,
+                      reschedule: () => NotificationService.instance.scheduleJournalReminder(
+                        hour: _journalTime.hour,
+                        minute: _journalTime.minute,
+                        days: _journalDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.journalReminderBase,
                     ),
                   ),
                   _buildReminderTile(
                     icon: Icons.wb_sunny_rounded,
                     title: 'Morning Adhkar',
-                    subtitle: 'After Fajr — start your day with remembrance (6:00 AM)',
+                    subtitle: 'After Fajr — start your day with remembrance',
                     value: _morningAdhkar,
+                    time: _morningTime,
+                    days: _morningDays,
                     onChanged: (v) => _handleToggle(
                       newValue: v,
-                      schedule: NotificationService.instance.scheduleMorningAdhkar,
-                      notificationId: NotificationService.morningAdhkarId,
+                      schedule: () => NotificationService.instance.scheduleMorningAdhkar(
+                        hour: _morningTime.hour,
+                        minute: _morningTime.minute,
+                        days: _morningDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.morningAdhkarBase,
                       updateState: (val) => _morningAdhkar = val,
+                    ),
+                    onTimeTap: () => _pickTime(
+                      current: _morningTime,
+                      onPicked: (t) => _morningTime = t,
+                      reminderEnabled: _morningAdhkar,
+                      reschedule: () => NotificationService.instance.scheduleMorningAdhkar(
+                        hour: _morningTime.hour,
+                        minute: _morningTime.minute,
+                        days: _morningDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.morningAdhkarBase,
+                    ),
+                    onDayTap: (weekday) => _toggleDay(
+                      days: _morningDays,
+                      weekday: weekday,
+                      onUpdated: (s) => _morningDays = s,
+                      reminderEnabled: _morningAdhkar,
+                      reschedule: () => NotificationService.instance.scheduleMorningAdhkar(
+                        hour: _morningTime.hour,
+                        minute: _morningTime.minute,
+                        days: _morningDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.morningAdhkarBase,
                     ),
                   ),
                   _buildReminderTile(
                     icon: Icons.nights_stay_rounded,
                     title: 'Evening Adhkar',
-                    subtitle: 'After Asr — wind down with gratitude (5:00 PM)',
+                    subtitle: 'After Asr — wind down with gratitude',
                     value: _eveningAdhkar,
+                    time: _eveningTime,
+                    days: _eveningDays,
                     onChanged: (v) => _handleToggle(
                       newValue: v,
-                      schedule: NotificationService.instance.scheduleEveningAdhkar,
-                      notificationId: NotificationService.eveningAdhkarId,
+                      schedule: () => NotificationService.instance.scheduleEveningAdhkar(
+                        hour: _eveningTime.hour,
+                        minute: _eveningTime.minute,
+                        days: _eveningDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.eveningAdhkarBase,
                       updateState: (val) => _eveningAdhkar = val,
+                    ),
+                    onTimeTap: () => _pickTime(
+                      current: _eveningTime,
+                      onPicked: (t) => _eveningTime = t,
+                      reminderEnabled: _eveningAdhkar,
+                      reschedule: () => NotificationService.instance.scheduleEveningAdhkar(
+                        hour: _eveningTime.hour,
+                        minute: _eveningTime.minute,
+                        days: _eveningDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.eveningAdhkarBase,
+                    ),
+                    onDayTap: (weekday) => _toggleDay(
+                      days: _eveningDays,
+                      weekday: weekday,
+                      onUpdated: (s) => _eveningDays = s,
+                      reminderEnabled: _eveningAdhkar,
+                      reschedule: () => NotificationService.instance.scheduleEveningAdhkar(
+                        hour: _eveningTime.hour,
+                        minute: _eveningTime.minute,
+                        days: _eveningDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.eveningAdhkarBase,
                     ),
                   ),
                   _buildReminderTile(
                     icon: Icons.task_alt_rounded,
                     title: 'Habit Check-in',
-                    subtitle: 'Evening reminder to complete your habits (9:00 PM)',
+                    subtitle: 'Evening reminder to complete your habits',
                     value: _habitCheckin,
+                    time: _habitCheckinTime,
+                    days: _habitCheckinDays,
                     onChanged: (v) => _handleToggle(
                       newValue: v,
-                      schedule: NotificationService.instance.scheduleHabitCheckin,
-                      notificationId: NotificationService.habitCheckinId,
+                      schedule: () => NotificationService.instance.scheduleHabitCheckin(
+                        hour: _habitCheckinTime.hour,
+                        minute: _habitCheckinTime.minute,
+                        days: _habitCheckinDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.habitCheckinBase,
                       updateState: (val) => _habitCheckin = val,
+                    ),
+                    onTimeTap: () => _pickTime(
+                      current: _habitCheckinTime,
+                      onPicked: (t) => _habitCheckinTime = t,
+                      reminderEnabled: _habitCheckin,
+                      reschedule: () => NotificationService.instance.scheduleHabitCheckin(
+                        hour: _habitCheckinTime.hour,
+                        minute: _habitCheckinTime.minute,
+                        days: _habitCheckinDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.habitCheckinBase,
+                    ),
+                    onDayTap: (weekday) => _toggleDay(
+                      days: _habitCheckinDays,
+                      weekday: weekday,
+                      onUpdated: (s) => _habitCheckinDays = s,
+                      reminderEnabled: _habitCheckin,
+                      reschedule: () => NotificationService.instance.scheduleHabitCheckin(
+                        hour: _habitCheckinTime.hour,
+                        minute: _habitCheckinTime.minute,
+                        days: _habitCheckinDays.toList()..sort(),
+                      ),
+                      reminderBase: NotificationService.habitCheckinBase,
                     ),
                   ),
 
@@ -477,43 +758,170 @@ class _RemindersScreenState extends State<RemindersScreen> {
     required String subtitle,
     required bool value,
     required ValueChanged<bool> onChanged,
+    required TimeOfDay time,
+    required Set<int> days,
+    required VoidCallback onTimeTap,
+    required ValueChanged<int> onDayTap, // weekday 1..7
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.fromLTRB(16, 12, 12, 14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.grey.shade200),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: const Color(0xFFDCFCE7),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, color: const Color(0xFF15803D), size: 20),
+          // Row 1: icon + title + master toggle
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDCFCE7),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: const Color(0xFF15803D), size: 20),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1F2937),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF9CA3AF),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: value,
+                onChanged: onChanged,
+                activeColor: const Color(0xFF15803D),
+              ),
+            ],
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+
+          // Row 2: time chip. Tappable regardless of toggle state so the
+          // user can pre-configure their time before enabling.
+          Padding(
+            padding: const EdgeInsets.only(top: 8, left: 54, right: 4),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: onTimeTap,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF9FAFB),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.alarm_rounded,
+                      size: 16,
+                      color: Color(0xFF15803D),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      time.format(context),
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: Color(0xFF1F2937),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.edit_rounded,
+                      size: 12,
+                      color: Color(0xFF9CA3AF),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Row 3: 7 day-of-week chips
+          Padding(
+            padding: const EdgeInsets.only(top: 10, left: 54, right: 4),
+            child: Wrap(
+              spacing: 6,
               children: [
-                Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF1F2937))),
-                const SizedBox(height: 2),
-                Text(subtitle, style: const TextStyle(fontSize: 12, color: Color(0xFF9CA3AF))),
+                for (int wd = 1; wd <= 7; wd++)
+                  _DayChip(
+                    label: const ['M', 'T', 'W', 'T', 'F', 'S', 'S'][wd - 1],
+                    selected: days.contains(wd),
+                    onTap: () => onDayTap(wd),
+                  ),
               ],
             ),
           ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeColor: const Color(0xFF15803D),
-          ),
         ],
+      ),
+    );
+  }
+}
+
+/// Compact 28×28 circle chip representing one day of the week in the
+/// reminder tiles. Filled green when the day is enabled, hollow grey when
+/// not. Used by [_RemindersScreenState._buildReminderTile].
+class _DayChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _DayChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
+        width: 28,
+        height: 28,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: selected ? const Color(0xFF15803D) : Colors.white,
+          border: Border.all(
+            color: selected
+                ? const Color(0xFF15803D)
+                : const Color(0xFFD1D5DB),
+            width: 1.2,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+            color: selected ? Colors.white : const Color(0xFF6B7280),
+          ),
+        ),
       ),
     );
   }
