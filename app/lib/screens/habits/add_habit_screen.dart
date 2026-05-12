@@ -90,6 +90,31 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
 
     setState(() => _saving = true);
 
+    // If the user picked a reminder time, gate the actual reminder-save
+    // on notification permission. Previously we wrote reminderHour /
+    // reminderMinute to Firestore even when permission was denied, so
+    // the habit showed "Reminder: 8:00 PM" in the UI but no notification
+    // ever fired. Now: if permission is denied, we save the habit WITHOUT
+    // reminder fields and tell the user what happened.
+    bool reminderEnabled = _reminderTime != null;
+    if (reminderEnabled) {
+      final permitted = await NotificationService.instance.requestPermission();
+      if (!permitted) {
+        reminderEnabled = false;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Notifications denied — habit saved without a reminder. Enable notifications in app settings, then edit the habit to add one.',
+              ),
+              backgroundColor: Color(0xFFD97706),
+              duration: Duration(seconds: 6),
+            ),
+          );
+        }
+      }
+    }
+
     final uid = FirebaseAuth.instance.currentUser!.uid;
     final data = <String, dynamic>{
       'title': title,
@@ -99,8 +124,8 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
       'frequency': _frequency,
       'isActive': true,
       if (_frequency == 'weekly') 'targetPerWeek': _targetPerWeek,
-      if (_reminderTime != null) 'reminderHour': _reminderTime!.hour,
-      if (_reminderTime != null) 'reminderMinute': _reminderTime!.minute,
+      if (reminderEnabled) 'reminderHour': _reminderTime!.hour,
+      if (reminderEnabled) 'reminderMinute': _reminderTime!.minute,
     };
 
     try {
@@ -108,7 +133,7 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
       if (_isEditing) {
         // On edit, explicitly clear fields that should no longer apply.
         if (_frequency != 'weekly') data['targetPerWeek'] = FieldValue.delete();
-        if (_reminderTime == null) {
+        if (!reminderEnabled) {
           data['reminderHour'] = FieldValue.delete();
           data['reminderMinute'] = FieldValue.delete();
         }
@@ -131,15 +156,25 @@ class _AddHabitScreenState extends State<AddHabitScreen> {
         habitId = ref.id;
       }
 
-      // Schedule/cancel the local reminder to match the doc's current state.
-      if (_reminderTime != null) {
-        await NotificationService.instance.requestPermission();
-        await NotificationService.instance.scheduleHabitReminder(
+      // Schedule or cancel the local reminder to match the saved doc.
+      if (reminderEnabled) {
+        final scheduled = await NotificationService.instance.scheduleHabitReminder(
           habitId: habitId,
           habitTitle: title,
           hour: _reminderTime!.hour,
           minute: _reminderTime!.minute,
         );
+        if (!scheduled && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Habit saved, but the reminder could not be scheduled. Check "Alarms & reminders" permission in app settings.',
+              ),
+              backgroundColor: Color(0xFFDC2626),
+              duration: Duration(seconds: 6),
+            ),
+          );
+        }
       } else {
         await NotificationService.instance.cancelHabitReminder(habitId);
       }

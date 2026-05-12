@@ -45,6 +45,15 @@
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
             </intent-filter>
         </receiver>
+        <!--
+            ScheduledNotificationReceiver is what AlarmManager actually
+            triggers when a zonedSchedule()'d notification's time arrives.
+            Recent flutter_local_notifications versions auto-merge this via
+            manifest merger, but declaring it explicitly is defensive — if
+            manifest merger ever fails or a plugin upgrade renames the
+            receiver, notifications won't silently stop firing.
+        -->
+        <receiver android:exported="false" android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"/>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

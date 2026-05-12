@@ -1,19 +1,49 @@
-Sakinah v1.0.3 — habit title fix.
+Sakinah v1.0.4 — notifications & reminders reliability fix.
 
-Fixed:
-- Habit titles created from "Track this advice" were truncated to 42
-  characters with a literal "..." stored in the database, so the habit
-  detail screen showed something like "Reflect on how the Prophet's
-  smile made ot..." Now stores the full advice text and wraps it
-  cleanly across multiple lines on the detail screen.
+Fixed (the "my reminders don't work" cluster):
 
-Behavior for old habits:
-- Existing habits with the truncated title automatically fall back to
-  showing the full text (sourceAdvice field). No data migration needed.
+1. Notification small-icon is now a proper white silhouette (heart).
+   Previously the launcher icon was used, which Android renders as a
+   white square. Now notifications look like Sakinah notifications.
 
-Carried over from v1.0.2:
-- Off-topic detector (factual questions, code etc. now show friendly
-  redirect instead of forcing a Seerah connection)
-- Delete journal entries with optional bookmarks/habits cascade
+2. Reminders fire on time even overnight. The scheduling mode changed
+   from inexact to exactAllowWhileIdle so Doze mode doesn't delay them.
+   Falls back to inexact mode if exact-alarm permission isn't granted
+   on Android 12+ devices.
 
-If anything looks off, hit Send Feedback and it'll reach the admin panel.
+3. ScheduledNotificationReceiver explicitly declared in AndroidManifest
+   as a safety net in case manifest merger ever drops it.
+
+4. Reminder toggles now reflect reality:
+   - Toggle ON only flips after scheduling actually succeeds.
+   - If scheduling fails (denied permission, plugin error), the toggle
+     stays OFF and you get a clear error snackbar instead of silently
+     thinking it worked.
+
+5. Habit reminders honour permission denial. Previously a habit with
+   "Reminder: 8 PM" could be saved even when notifications were denied
+   — the habit would appear in your list with the time visible but no
+   notification ever fired. Now the habit saves without a reminder and
+   tells you to enable notifications first.
+
+6. NotificationService self-bootstraps. Schedule/cancel calls work even
+   if main.dart's init failed silently (e.g. on a flaky first launch).
+
+7. Notification channel explicitly created on Android 8+ with the right
+   importance, so Samsung One UI devices don't drop reminders to a
+   low-priority channel that never appears in the status bar.
+
+New:
+
+8. "Send test notification now" button at the bottom of the Reminders
+   screen. Fires a notification immediately so you can verify the whole
+   stack works without waiting for 8 PM.
+
+Other:
+- Carries v1.0.3's habit title fix and v1.0.2's off-topic detector.
+
+If a reminder you set still doesn't fire after this update:
+- Open the new Reminders screen and tap "Send test notification now"
+  to verify the basics.
+- If even the test doesn't fire, your device's "Alarms & reminders"
+  permission is blocked. Open app settings → Permissions → enable.

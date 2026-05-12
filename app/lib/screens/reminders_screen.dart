@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/daily_wisdom_service.dart';
 import '../services/notification_service.dart';
 
@@ -38,16 +39,17 @@ class _RemindersScreenState extends State<RemindersScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(_uid)
-        .collection('settings')
-        .doc('reminders')
-        .get();
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_uid)
+          .collection('settings')
+          .doc('reminders')
+          .get();
 
-    if (doc.exists) {
-      final data = doc.data()!;
-      if (mounted) {
+      if (doc.exists) {
+        final data = doc.data()!;
+        if (!mounted) return;
         setState(() {
           _journalReminder = data['journalReminder'] ?? false;
           _morningAdhkar = data['morningAdhkar'] ?? false;
@@ -55,36 +57,66 @@ class _RemindersScreenState extends State<RemindersScreen> {
           _habitCheckin = data['habitCheckin'] ?? false;
           _loading = false;
         });
-        _syncNotifications();
+        // Sync notifications to match Firestore state. Wrapped + awaited
+        // (was fire-and-forget previously) so a thrown exception bubbles
+        // to the user as a snackbar rather than disappearing into the
+        // void. Also requires notification permission before scheduling.
+        try {
+          // Quietly check the existing permission state — we don't pop
+          // the request dialog here because the user hasn't tapped
+          // anything yet. If permission is missing we just leave the
+          // toggles visible and let the per-toggle handler trigger the
+          // prompt at the moment the user opts in.
+          final permitted = await Permission.notification.status;
+          if (permitted.isGranted) {
+            await _syncNotifications();
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to sync reminders: $e')),
+            );
+          }
+        }
+      } else {
+        if (mounted) setState(() => _loading = false);
       }
-    } else {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _loading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not load reminder settings: $e')),
+        );
+      }
     }
   }
 
   /// Re-schedule or cancel notifications to match current toggle states.
-  Future<void> _syncNotifications() async {
+  /// Returns true if all schedule/cancel operations succeeded.
+  Future<bool> _syncNotifications() async {
     final ns = NotificationService.instance;
+    bool allOk = true;
     if (_journalReminder) {
-      await ns.scheduleJournalReminder();
+      allOk &= await ns.scheduleJournalReminder();
     } else {
       await ns.cancelNotification(NotificationService.journalReminderId);
     }
     if (_morningAdhkar) {
-      await ns.scheduleMorningAdhkar();
+      allOk &= await ns.scheduleMorningAdhkar();
     } else {
       await ns.cancelNotification(NotificationService.morningAdhkarId);
     }
     if (_eveningAdhkar) {
-      await ns.scheduleEveningAdhkar();
+      allOk &= await ns.scheduleEveningAdhkar();
     } else {
       await ns.cancelNotification(NotificationService.eveningAdhkarId);
     }
     if (_habitCheckin) {
-      await ns.scheduleHabitCheckin();
+      allOk &= await ns.scheduleHabitCheckin();
     } else {
       await ns.cancelNotification(NotificationService.habitCheckinId);
     }
+    return allOk;
   }
 
   /// Request notification permission; show snackbar if denied.
@@ -101,38 +133,87 @@ class _RemindersScreenState extends State<RemindersScreen> {
     return granted;
   }
 
-  /// Toggle handler: checks permission, schedules/cancels, saves to Firestore.
+  /// Toggle handler. Order matters: we only flip the UI switch ON after
+  /// scheduling succeeds, and OFF after cancel returns. If anything fails
+  /// the toggle stays in its previous position and we show an explicit
+  /// snackbar — no more "switch says ON but no notification ever fires".
   Future<void> _handleToggle({
     required bool newValue,
-    required Future<void> Function() schedule,
+    required Future<bool> Function() schedule,
     required int notificationId,
     required void Function(bool) updateState,
   }) async {
     if (newValue) {
       final hasPermission = await _ensureNotificationPermission();
-      if (!hasPermission) return;
-      setState(() => updateState(newValue));
-      await schedule();
+      if (!hasPermission) return; // toggle stays OFF
+      final scheduled = await schedule();
+      if (!mounted) return;
+      if (!scheduled) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not schedule reminder. Check "Alarms & reminders" permission in app settings.',
+            ),
+            backgroundColor: Color(0xFFDC2626),
+            duration: Duration(seconds: 6),
+          ),
+        );
+        return; // toggle stays OFF on failure
+      }
+      setState(() => updateState(true));
     } else {
-      setState(() => updateState(newValue));
       await NotificationService.instance.cancelNotification(notificationId);
+      if (!mounted) return;
+      setState(() => updateState(false));
     }
-    _saveSettings();
+    await _saveSettings();
   }
 
+  /// Persist toggle state to Firestore. Surfaces save errors via snackbar
+  /// rather than swallowing them so notification state and stored state
+  /// don't diverge silently.
   Future<void> _saveSettings() async {
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(_uid)
-        .collection('settings')
-        .doc('reminders')
-        .set({
-      'journalReminder': _journalReminder,
-      'morningAdhkar': _morningAdhkar,
-      'eveningAdhkar': _eveningAdhkar,
-      'habitCheckin': _habitCheckin,
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_uid)
+          .collection('settings')
+          .doc('reminders')
+          .set({
+        'journalReminder': _journalReminder,
+        'morningAdhkar': _morningAdhkar,
+        'eveningAdhkar': _eveningAdhkar,
+        'habitCheckin': _habitCheckin,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save settings: $e')),
+        );
+      }
+    }
+  }
+
+  /// Fires a notification right now so the user can verify the full stack
+  /// (permission + channel + icon) works without waiting for a scheduled
+  /// time. Shows success/failure feedback so it's obvious what state we
+  /// ended up in.
+  Future<void> _handleSendTest() async {
+    final hasPermission = await _ensureNotificationPermission();
+    if (!hasPermission) return;
+    final ok = await NotificationService.instance.sendTestNotification();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          ok
+              ? 'Sent. Pull down your status bar to see it.'
+              : 'Could not send test notification — check device notification settings.',
+        ),
+        backgroundColor: ok ? const Color(0xFF15803D) : const Color(0xFFDC2626),
+      ),
+    );
   }
 
   Future<void> _loadWisdom() async {
@@ -330,6 +411,28 @@ class _RemindersScreenState extends State<RemindersScreen> {
                       schedule: NotificationService.instance.scheduleHabitCheckin,
                       notificationId: NotificationService.habitCheckinId,
                       updateState: (val) => _habitCheckin = val,
+                    ),
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Test button — fires a notification right now so the
+                  // user (or a viva examiner) can verify the whole
+                  // notification stack works without waiting for 8 PM.
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _handleSendTest,
+                      icon: const Icon(Icons.notifications_active_rounded, size: 18),
+                      label: const Text('Send test notification now'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF15803D),
+                        side: const BorderSide(color: Color(0xFF15803D)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
                     ),
                   ),
 
