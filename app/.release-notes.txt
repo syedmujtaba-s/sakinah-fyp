@@ -1,31 +1,29 @@
-Sakinah v1.0.5 — fully customisable reminders.
+Sakinah v1.0.6 — the app notices when your words don't match your mood.
 
 New:
 
-1. Tap the time chip on any reminder (Journal Reflection, Morning Adhkar,
-   Evening Adhkar, Habit Check-in) to pick your own time. Native Android
-   time picker, supports both 12/24-hour formats.
+1. Emotion mismatch check.
+   If you check in feeling one way but then write a reflection that
+   clearly says otherwise — e.g. you pick "Happy" but pour out something
+   heavy and sad — Sakinah now gently asks: "You checked in feeling
+   happy, but your reflection reads more like sad. Which feels truer
+   right now?"
 
-2. Per-day-of-week control. Each reminder shows seven small chips
-   (M T W T F S S). Tap to toggle that day on or off — e.g. skip Friday,
-   or run a habit reminder only on weekends. At least one day must stay
-   selected.
+   You always have the final say:
+   - "Keep Happy" → trusts your original check-in
+   - "Switch to Sad" → updates your mood
 
-3. Both time and day preferences sync to your account so they survive
-   reinstalls and follow you to a new device.
+   Whichever you pick is used for the guidance, saved with your journal
+   entry, and shown on the guidance screen — so your Seerah story and
+   your mood history actually match how you feel.
 
-How it works:
-- Time chip → tap → pick → notification re-schedules immediately.
-- Day chip → tap → that day's alarm is added or cancelled. Other days
-  are unaffected (so you can change days without losing the reminder
-  on the rest of the week).
-- Defaults still 8 PM / 6 AM / 5 PM / 9 PM (every day) if you don't
-  customise.
+   Only strong contradictions trigger this — mild nuance won't. And it
+   never interrupts a crisis: if your words signal real distress, the
+   helpline response always comes first.
 
 Carries forward:
-- v1.0.4 notification reliability fixes (icon, exact alarms, channel,
-  permission handling, test button).
+- v1.0.5 customisable reminder times + day-of-week control
+- v1.0.4 notification reliability fixes
+- v1.0.2 off-topic detector
 
-Existing users upgrading from v1.0.4: your old daily-style alarms are
-automatically cancelled on first launch of v1.0.5 — no duplicate
-notifications.
+If anything feels off, the Send Feedback screen reaches the admin panel.

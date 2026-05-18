@@ -217,6 +217,116 @@ def _offtopic_response(emotion: str) -> dict:
     }
 
 
+# Cache for the emotion-mismatch classifier — keyed by "emotion::text".
+_MISMATCH_CACHE: dict[str, tuple[bool, str | None]] = {}
+_MISMATCH_CACHE_CAP = 512
+
+
+async def _detect_emotion_mismatch(
+    text: str, claimed_emotion: str
+) -> tuple[bool, str | None]:
+    """
+    Fast Groq pre-flight that checks whether the journal text strongly
+    contradicts the emotion the user checked in with.
+
+    The check-in emotion is locked at check-in time and the journal text
+    written afterwards is never re-analysed — so a user can pick "happy"
+    then pour out something clearly sad. Retrieval, the crisis soft-tier,
+    and the displayed mood tag all key off that stale label. This catches
+    the contradiction and lets the app ask the user which is truer.
+
+    Returns (is_mismatch, suggested_emotion). suggested_emotion is one of
+    SAKINAH_EMOTIONS or None.
+
+    Guarantees:
+      - text under 4 words -> (False, None): too little signal to judge
+      - Groq failure -> (False, None): fail-open, never block guidance
+      - suggested == claimed -> treated as no mismatch
+    """
+    stripped = (text or "").strip()
+    if len(stripped.split()) < 4:
+        return (False, None)
+
+    cache_key = f"{claimed_emotion}::{stripped.lower()}"
+    if cache_key in _MISMATCH_CACHE:
+        return _MISMATCH_CACHE[cache_key]
+
+    if "gsk_" not in GROQ_API_KEY:
+        return (False, None)
+
+    allowed = ", ".join(sorted(SUPPORTED_EMOTIONS))
+    prompt = (
+        "A user of an emotional-wellness app checked in feeling "
+        f"'{claimed_emotion}'. Here is the reflection they then wrote:\n"
+        f'"{stripped}"\n\n'
+        "Does the reflection clearly express an emotion that is OPPOSITE "
+        f"or very different from '{claimed_emotion}'? Only say yes for a "
+        "STRONG, obvious contradiction (e.g. checked in 'happy' but wrote "
+        "about grief). Mild nuance is NOT a mismatch.\n"
+        f"If yes, pick the single best-fitting label from: {allowed}.\n"
+        'Reply ONLY compact JSON: {"mismatch": true|false, '
+        '"suggested": "<label>"|null}'
+    )
+
+    result: tuple[bool, str | None] = (False, None)
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                GROQ_URL,
+                headers={
+                    "Authorization": f"Bearer {GROQ_API_KEY}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": OFFTOPIC_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.0,
+                    "max_tokens": 40,
+                    "response_format": {"type": "json_object"},
+                },
+            )
+        if response.status_code == 200:
+            content = response.json()["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+            is_mismatch = parsed.get("mismatch") is True
+            suggested = parsed.get("suggested")
+            if isinstance(suggested, str):
+                suggested = suggested.strip().lower()
+            # Guard: suggestion must be a real taxonomy emotion AND must
+            # actually differ from what the user claimed.
+            if (
+                is_mismatch
+                and suggested in SUPPORTED_EMOTIONS
+                and suggested != claimed_emotion
+            ):
+                result = (True, suggested)
+    except Exception as e:
+        # Fail-open: a Groq hiccup must never block guidance.
+        print(f"[mismatch] classifier failed, treating as no mismatch: {e}")
+        result = (False, None)
+
+    if len(_MISMATCH_CACHE) >= _MISMATCH_CACHE_CAP:
+        _MISMATCH_CACHE.pop(next(iter(_MISMATCH_CACHE)))
+    _MISMATCH_CACHE[cache_key] = result
+    return result
+
+
+def _emotion_mismatch_response(claimed: str, suggested: str) -> dict:
+    """Structured payload the mobile app renders as the 'which feeling is
+    truer?' dialog. The app re-calls /api/guidance with emotion_confirmed
+    set, so this check runs at most once per journal submission."""
+    return {
+        "emotion_mismatch": True,
+        "claimed_emotion": claimed,
+        "suggested_emotion": suggested,
+        "mismatch_message": (
+            f"You checked in feeling {claimed}, but your reflection reads "
+            f"more like {suggested}. Which feels truer right now?"
+        ),
+        "crisis": False,
+    }
+
+
 # ============================
 #  1. GET GUIDANCE (CORE ENDPOINT)
 # ============================
@@ -255,18 +365,31 @@ async def get_guidance(request: GuidanceRequest):
         and request.previous_story_id is not None
     )
 
-    # Off-topic pre-flight. Ordering matters:
+    # Pre-flight checks. Ordering matters:
     #   1. emotion validation (above) — fail-fast invalid emotions
     #   2. crisis check (above) — safety-critical, never bypass
-    #   3. off-topic check (HERE) — only runs if no crisis AND not a follow-up
-    #   4. RAG (below)
-    # We do NOT run off-topic on follow-up requests because by definition
-    # the user is continuing a thread that was already on-topic. We also do
-    # NOT run it when is_crisis is True so a person typing "I want to die"
-    # never gets a redirect dialog — the helpline response wins.
+    #   3. off-topic check (HERE) — only if no crisis AND not a follow-up
+    #   4. emotion-mismatch check (HERE) — same gating, plus skipped once
+    #      the user has confirmed their feeling (emotion_confirmed=True)
+    #   5. RAG (below)
+    # We do NOT run these on follow-up requests (the thread is already
+    # established) or when is_crisis is True (the helpline response wins —
+    # a distressed user must never get a redirect or a "pick your mood"
+    # dialog instead of help).
     if not is_crisis and not is_followup:
         if await _detect_off_topic(request.journal_entry):
             return _offtopic_response(emotion)
+
+        # Emotion-mismatch: the user's journal text clearly contradicts
+        # the emotion they checked in with. We surface this ONCE — the app
+        # re-calls with emotion_confirmed=True after the user decides,
+        # so this branch can't loop.
+        if not request.emotion_confirmed:
+            mismatch, suggested = await _detect_emotion_mismatch(
+                request.journal_entry, emotion
+            )
+            if mismatch and suggested:
+                return _emotion_mismatch_response(emotion, suggested)
 
     if is_followup:
         # Fetch the specific story the user was previously shown

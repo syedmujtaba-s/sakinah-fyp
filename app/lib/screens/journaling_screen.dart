@@ -25,7 +25,16 @@ class _JournalingScreenState extends State<JournalingScreen> {
   final TextEditingController _journalController = TextEditingController();
   bool _isProcessing = false;
 
-  Future<void> _submitJournal() async {
+  // The mood is locked in at check-in via widget.mood, but if the journal
+  // text strongly contradicts it the backend flags an emotion_mismatch and
+  // the user can switch. We track the live value here so the switch sticks
+  // for the resubmit, the saved journal doc, and the guidance screen.
+  late String _mood = widget.mood;
+
+  /// [emotionConfirmed] is true on the resubmit AFTER the user has answered
+  /// the emotion-mismatch dialog — it tells the backend to skip the mismatch
+  /// pre-flight so we can't loop back into the same dialog.
+  Future<void> _submitJournal({bool emotionConfirmed = false}) async {
     if (_journalController.text.trim().isEmpty) return;
 
     setState(() => _isProcessing = true);
@@ -45,7 +54,7 @@ class _JournalingScreenState extends State<JournalingScreen> {
             .collection('journals')
             .add({
           'text': journalText,
-          'mood': widget.mood,
+          'mood': _mood,
           'createdAt': FieldValue.serverTimestamp(),
           'hasGuidance': false,
         });
@@ -60,11 +69,33 @@ class _JournalingScreenState extends State<JournalingScreen> {
     try {
       final guidanceData = await GuidanceService.getGuidance(
         journalEntry: journalText,
-        emotion: widget.mood,
+        emotion: _mood,
         excludeStoryIds: widget.excludeStoryIds,
+        emotionConfirmed: emotionConfirmed,
       );
 
       _hasFetchedGuidanceThisSession = true;
+
+      // Emotion-mismatch path. The journal text clearly contradicts the
+      // mood the user checked in with (e.g. checked in "happy" but wrote
+      // about grief). Delete the placeholder doc, then ask the user which
+      // feeling is truer — their answer drives the resubmit.
+      if (guidanceData['emotion_mismatch'] == true) {
+        if (journalRef != null) {
+          try {
+            await journalRef.delete();
+          } catch (_) {/* best-effort cleanup */}
+        }
+        if (!mounted) return;
+        setState(() => _isProcessing = false);
+        await _showEmotionMismatchDialog(
+          claimed: (guidanceData['claimed_emotion'] as String?) ?? _mood,
+          suggested: (guidanceData['suggested_emotion'] as String?) ?? _mood,
+          message: (guidanceData['mismatch_message'] as String?) ??
+              'Your reflection sounds different from the mood you picked.',
+        );
+        return;
+      }
 
       // Off-topic redirect path. Backend detected the text isn't an
       // emotional reflection (e.g. "who is the PM of Pakistan?"). Don't
@@ -107,7 +138,7 @@ class _JournalingScreenState extends State<JournalingScreen> {
               'practical_advice': guidanceData['practical_advice'] ?? [],
               'dua': guidanceData['dua'] ?? '',
               'follow_up_questions': guidanceData['follow_up_questions'] ?? [],
-              'emotion': guidanceData['emotion'] ?? widget.mood,
+              'emotion': guidanceData['emotion'] ?? _mood,
               'ai_fallback': guidanceData['ai_fallback'] ?? false,
               'crisis': guidanceData['crisis'] ?? false,
               'crisis_message': guidanceData['crisis_message'] ?? '',
@@ -124,7 +155,7 @@ class _JournalingScreenState extends State<JournalingScreen> {
         context,
         MaterialPageRoute(
           builder: (_) => GuidanceScreen(
-            mood: widget.mood,
+            mood: _mood,
             guidanceData: guidanceData,
           ),
         ),
@@ -206,6 +237,62 @@ class _JournalingScreenState extends State<JournalingScreen> {
     );
   }
 
+  /// Shown when the backend detects the journal text strongly contradicts
+  /// the mood the user checked in with. The user always has the final say —
+  /// "Keep" trusts their original pick, "Switch" adopts the AI's reading.
+  /// Either choice resubmits with emotionConfirmed:true so the backend
+  /// skips the mismatch check the second time and proceeds to guidance.
+  Future<void> _showEmotionMismatchDialog({
+    required String claimed,
+    required String suggested,
+    required String message,
+  }) async {
+    String cap(String s) =>
+        s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
+
+    final choice = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('How are you feeling?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message, style: const TextStyle(fontSize: 14, height: 1.45)),
+            const SizedBox(height: 12),
+            const Text(
+              'You have the final say — pick whichever is true for you.',
+              style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
+            ),
+          ],
+        ),
+        actionsOverflowDirection: VerticalDirection.down,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, claimed),
+            child: Text('Keep ${cap(claimed)}'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, suggested),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF15803D),
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Switch to ${cap(suggested)}'),
+          ),
+        ],
+      ),
+    );
+
+    if (choice == null || !mounted) return;
+    // Whatever the user chose becomes the live mood. Re-run guidance with
+    // emotionConfirmed:true so the backend doesn't ask again.
+    setState(() => _mood = choice);
+    await _submitJournal(emotionConfirmed: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -256,7 +343,7 @@ class _JournalingScreenState extends State<JournalingScreen> {
                   children: [
                     const Text("Feeling: ", style: TextStyle(color: Colors.grey)),
                     Text(
-                      widget.mood,
+                      _mood,
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         color: Color(0xFF15803D),

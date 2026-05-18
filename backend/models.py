@@ -41,3 +41,7 @@ class GuidanceRequest(BaseModel):
     # Optional: the previous story ID; we re-use the same story for follow-ups
     # rather than doing a fresh RAG retrieval (same thread of conversation).
     previous_story_id: str | None = None
+    # Set true when the user has already been shown the emotion-mismatch
+    # dialog and made a choice. Tells the backend to skip the mismatch
+    # pre-flight so the second call can't loop back into the same dialog.
+    emotion_confirmed: bool = False

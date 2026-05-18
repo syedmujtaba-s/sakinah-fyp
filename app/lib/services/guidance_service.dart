@@ -23,6 +23,9 @@ class GuidanceService {
   /// a fresh RAG lookup and continues the same story-grounded conversation.
   /// [previousSeerahConnection] feeds the LLM the earlier narrative so the
   /// follow-up answer goes deeper instead of repeating.
+  /// [emotionConfirmed] — set true once the user has been shown the
+  /// emotion-mismatch dialog and made a choice. Tells the backend to skip
+  /// the mismatch pre-flight so the resubmit can't loop back into it.
   static Future<Map<String, dynamic>> getGuidance({
     required String journalEntry,
     required String emotion,
@@ -30,6 +33,7 @@ class GuidanceService {
     String? followupQuestion,
     String? previousStoryId,
     String? previousSeerahConnection,
+    bool emotionConfirmed = false,
   }) async {
     final payload = {
       'journal_entry': journalEntry,
@@ -41,6 +45,7 @@ class GuidanceService {
         'previous_story_id': previousStoryId,
       if (previousSeerahConnection != null && previousSeerahConnection.isNotEmpty)
         'previous_seerah_connection': previousSeerahConnection,
+      if (emotionConfirmed) 'emotion_confirmed': true,
     };
 
     try {
